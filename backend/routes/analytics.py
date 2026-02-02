@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 from datetime import datetime
-import pandas as pd
+import csv
 import sys
 import os
 
@@ -73,8 +73,20 @@ async def get_weekly_stats():
     csv_path = os.path.join(ml_models_path, 'analytics', 'sample_workout_history.csv')
     
     try:
-        df = pd.read_csv(csv_path)
-        workouts = df.to_dict('records')
+        workouts = []
+        if os.path.exists(csv_path):
+            with open(csv_path, mode='r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    workouts.append({
+                        "date": row.get("date", ""),
+                        "exercise_type": row.get("exercise_type", ""),
+                        "duration_minutes": int(row.get("duration_minutes", 0) or 0),
+                        "calories_burned": int(row.get("calories_burned", 0) or 0),
+                        "intensity": int(row.get("intensity", 0) or 0),
+                        "reps": int(row.get("reps", 0) or 0),
+                        "sets": int(row.get("sets", 0) or 0),
+                    })
         
         stats = analytics_engine.calculate_weekly_stats(workouts)
         return {
@@ -109,8 +121,20 @@ async def get_performance_metrics():
     csv_path = os.path.join(ml_models_path, 'analytics', 'sample_workout_history.csv')
     
     try:
-        df = pd.read_csv(csv_path)
-        workouts = df.to_dict('records')
+        workouts = []
+        if os.path.exists(csv_path):
+            with open(csv_path, mode='r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    workouts.append({
+                        "date": row.get("date", ""),
+                        "exercise_type": row.get("exercise_type", ""),
+                        "duration_minutes": int(row.get("duration_minutes", 0) or 0),
+                        "calories_burned": int(row.get("calories_burned", 0) or 0),
+                        "intensity": int(row.get("intensity", 0) or 0),
+                        "reps": int(row.get("reps", 0) or 0),
+                        "sets": int(row.get("sets", 0) or 0),
+                    })
         
         metrics = analytics_engine.calculate_performance_metrics(workouts)
         return {
@@ -146,8 +170,20 @@ async def get_insights():
     csv_path = os.path.join(ml_models_path, 'analytics', 'sample_workout_history.csv')
     
     try:
-        df = pd.read_csv(csv_path)
-        workouts = df.to_dict('records')
+        workouts = []
+        if os.path.exists(csv_path):
+            with open(csv_path, mode='r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    workouts.append({
+                        "date": row.get("date", ""),
+                        "exercise_type": row.get("exercise_type", ""),
+                        "duration_minutes": int(row.get("duration_minutes", 0) or 0),
+                        "calories_burned": int(row.get("calories_burned", 0) or 0),
+                        "intensity": int(row.get("intensity", 0) or 0),
+                        "reps": int(row.get("reps", 0) or 0),
+                        "sets": int(row.get("sets", 0) or 0),
+                    })
         
         user_data = {
             'workouts': workouts,
@@ -202,19 +238,16 @@ async def log_workout(workout: WorkoutSession):
     csv_path = os.path.join(ml_models_path, 'analytics', 'sample_workout_history.csv')
     
     try:
-        # Read existing data
-        try:
-            df = pd.read_csv(csv_path)
-        except FileNotFoundError:
-            # Create new dataframe if file doesn't exist
-            df = pd.DataFrame(columns=['date', 'exercise_type', 'duration_minutes', 'calories_burned', 'intensity', 'reps', 'sets'])
-        
-        # Add new workout
-        new_workout = pd.DataFrame([workout.dict()])
-        df = pd.concat([df, new_workout], ignore_index=True)
-        
-        # Save back to CSV
-        df.to_csv(csv_path, index=False)
+        file_exists = os.path.exists(csv_path)
+        # Ensure parent directory exists
+        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+        fieldnames = ['date', 'exercise_type', 'duration_minutes', 'calories_burned', 'intensity', 'reps', 'sets']
+        # Append row and write header if file didn't exist
+        with open(csv_path, mode='a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(workout.dict())
         
         return {
             "status": "success",
@@ -234,9 +267,14 @@ async def get_workout_history(limit: int = 30):
     csv_path = os.path.join(ml_models_path, 'analytics', 'sample_workout_history.csv')
     
     try:
-        df = pd.read_csv(csv_path)
-        df = df.sort_values('date', ascending=False).head(limit)
-        workouts = df.to_dict('records')
+        workouts = []
+        if os.path.exists(csv_path):
+            with open(csv_path, mode='r', newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    workouts.append(row)
+        # Sort by date descending and limit
+        workouts = sorted(workouts, key=lambda x: x.get('date', ''), reverse=True)[:limit]
         
         return {
             "status": "success",
