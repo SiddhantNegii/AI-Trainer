@@ -12,3 +12,13 @@ psycopg2-binary==2.9.9
 alembic==1.13.1
 requests==2.31.0
 httpx==0.26.0
+
+# ML & Data Science Requirements
+# Note: Using opencv-python-headless for server environments to avoid X11 dependencies
+opencv-python-headless==4.9.0.80
+mediapipe==0.10.9
+numpy==1.26.3
+pandas==2.1.4
+scikit-learn==1.4.0
+scipy==1.11.4
+matplotlib==3.8.2

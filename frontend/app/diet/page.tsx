@@ -17,7 +17,8 @@ export default function DietPage() {
     setError('')
     
     try {
-      const response = await fetch('http://localhost:8001/api/diet/meal-plan/generate', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+      const response = await fetch(`${apiUrl}/api/diet/meal-plan/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

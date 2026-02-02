@@ -59,7 +59,8 @@ export default function PoseDetectionPage() {
 
   const fetchExercises = async () => {
     try {
-      const response = await fetch("http://127.0.0.1:8001/api/pose/exercises");
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+      const response = await fetch(`${apiUrl}/api/pose/exercises`);
       const data = await response.json();
       setExercises(data.exercises || []);
     } catch (error) {
@@ -69,7 +70,8 @@ export default function PoseDetectionPage() {
 
   const fetchStats = async () => {
     try {
-      const response = await fetch("http://127.0.0.1:8001/api/pose/stats");
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+      const response = await fetch(`${apiUrl}/api/pose/stats`);
       const data = await response.json();
       setStats(data);
     } catch (error) {
@@ -80,7 +82,8 @@ export default function PoseDetectionPage() {
   const analyzeExercise = async () => {
     setLoading(true);
     try {
-      const response = await fetch("http://127.0.0.1:8001/api/pose/analyze", {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+      const response = await fetch(`${apiUrl}/api/pose/analyze`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -122,7 +125,9 @@ export default function PoseDetectionPage() {
         setFormScore(0);
         
         // Connect to WebSocket
-        const ws = new WebSocket("ws://127.0.0.1:8001/ws/pose");
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+        const wsUrl = apiUrl.replace(/^http/, 'ws') + '/ws/pose';
+        const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
         
         ws.onopen = () => {
@@ -247,7 +252,8 @@ export default function PoseDetectionPage() {
         sets: Math.ceil(repCount / 10) // Assume 10 reps per set
       };
 
-      const response = await fetch('http://127.0.0.1:8001/api/analytics/log-workout', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+      const response = await fetch(`${apiUrl}/api/analytics/log-workout`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

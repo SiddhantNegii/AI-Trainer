@@ -27,9 +27,10 @@ export default function WorkoutPage() {
   useEffect(() => {
     const fetchFilters = async () => {
       try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
         const [bodyPartsRes, equipmentsRes] = await Promise.all([
-          fetch('http://localhost:8001/api/workout/bodyparts'),
-          fetch('http://localhost:8001/api/workout/equipments')
+          fetch(`${apiUrl}/api/workout/bodyparts`),
+          fetch(`${apiUrl}/api/workout/equipments`)
         ])
         
         const bodyPartsData = await bodyPartsRes.json()
@@ -50,14 +51,15 @@ export default function WorkoutPage() {
     const fetchExercises = async () => {
       setLoading(true)
       try {
-        let url = 'http://localhost:8001/api/workout/exercises?limit=50'
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+        let url = `${apiUrl}/api/workout/exercises?limit=50`
         
         if (searchQuery) {
-          url = `http://localhost:8001/api/workout/exercises/search?query=${encodeURIComponent(searchQuery)}&limit=50`
+          url = `${apiUrl}/api/workout/exercises/search?query=${encodeURIComponent(searchQuery)}&limit=50`
         } else if (selectedBodyPart) {
-          url = `http://localhost:8001/api/workout/exercises/bodypart/${encodeURIComponent(selectedBodyPart)}?limit=50`
+          url = `${apiUrl}/api/workout/exercises/bodypart/${encodeURIComponent(selectedBodyPart)}?limit=50`
         } else if (selectedEquipment) {
-          url = `http://localhost:8001/api/workout/exercises/equipment/${encodeURIComponent(selectedEquipment)}?limit=50`
+          url = `${apiUrl}/api/workout/exercises/equipment/${encodeURIComponent(selectedEquipment)}?limit=50`
         }
         
         const response = await fetch(url)

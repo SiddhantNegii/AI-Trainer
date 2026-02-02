@@ -14,18 +14,19 @@ export default function AnalyticsPage() {
 
   const fetchAnalytics = async () => {
     try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
       // Fetch weekly stats
-      const statsRes = await fetch('http://127.0.0.1:8001/api/analytics/weekly-stats')
+      const statsRes = await fetch(`${apiUrl}/api/analytics/weekly-stats`)
       const statsData = await statsRes.json()
       setWeeklyStats(statsData.stats)
 
       // Fetch insights
-      const insightsRes = await fetch('http://127.0.0.1:8001/api/analytics/insights')
+      const insightsRes = await fetch(`${apiUrl}/api/analytics/insights`)
       const insightsData = await insightsRes.json()
       setInsights(insightsData.insights)
 
       // Fetch performance metrics
-      const metricsRes = await fetch('http://127.0.0.1:8001/api/analytics/performance-metrics')
+      const metricsRes = await fetch(`${apiUrl}/api/analytics/performance-metrics`)
       const metricsData = await metricsRes.json()
       setPerformanceMetrics(metricsData.metrics)
 
