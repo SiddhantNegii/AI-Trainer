@@ -25,15 +25,6 @@ from routes.analytics import router as analytics_router
 ml_models_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'ml_models', 'pose_detection'))
 sys.path.insert(0, ml_models_path)
 
-try:
-    from pose_detector import PoseDetector
-    from exercise_analyzer import ExerciseAnalyzer
-    MEDIAPIPE_AVAILABLE = True
-    print(f"MediaPipe modules loaded from: {ml_models_path}")
-except ImportError as e:
-    MEDIAPIPE_AVAILABLE = False
-    print(f"WARNING: MediaPipe not available: {e}")
-
 app = FastAPI(
     title="AI Fitness Trainer API",
     description="Backend API for AI-powered virtual fitness trainer",
@@ -73,15 +64,13 @@ async def websocket_pose_detection(websocket: WebSocket):
     print("WebSocket connection attempt...")
     await websocket.accept()
     print("WebSocket connected!")
-    
-    if not MEDIAPIPE_AVAILABLE:
-        await websocket.send_json({
-            "error": "MediaPipe not available. Please install: pip install mediapipe opencv-python numpy"
-        })
+    try:
+        from pose_detector import PoseDetector
+        from exercise_analyzer import ExerciseAnalyzer
+    except Exception as e:
+        await websocket.send_json({"error": f"MediaPipe not available: {str(e)}"})
         await websocket.close()
         return
-    
-    # Initialize pose detector and analyzer
     pose_detector = PoseDetector(min_detection_confidence=0.5, min_tracking_confidence=0.5)
     exercise_analyzer = ExerciseAnalyzer()
     current_exercise = "squat"

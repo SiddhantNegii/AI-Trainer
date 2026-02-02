@@ -16,14 +16,8 @@ backend_dir = os.path.dirname(os.path.dirname(__file__))
 ml_models_path = os.path.abspath(os.path.join(backend_dir, '..', 'ml_models'))
 sys.path.insert(0, ml_models_path)
 
-try:
-    from analytics.analytics_engine import AnalyticsEngine
-    analytics_engine = AnalyticsEngine()
-    print(f"Analytics Engine loaded from: {ml_models_path}")
-except Exception as e:
-    print(f"WARNING: Analytics Engine not available: {e}")
-    print(f"   Searched in: {ml_models_path}")
-    analytics_engine = None
+analytics_engine = None
+print("Analytics Engine disabled for startup")
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 

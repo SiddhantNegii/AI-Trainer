@@ -1,0 +1,2 @@
+# Delegate to backend requirements for Render build compatibility
+-r backend/requirements.txt
