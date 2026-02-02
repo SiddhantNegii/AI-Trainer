@@ -40,10 +40,17 @@ app = FastAPI(
     version="1.0.0"
 )
 
-frontend_origin = os.getenv("FRONTEND_URL", "*")
+frontend_host = os.getenv("FRONTEND_HOST")
+frontend_url = os.getenv("FRONTEND_URL")
+if frontend_host:
+    allowed_origins = [f"https://{frontend_host}", f"http://{frontend_host}"]
+elif frontend_url:
+    allowed_origins = [frontend_url]
+else:
+    allowed_origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[frontend_origin] if frontend_origin != "*" else ["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

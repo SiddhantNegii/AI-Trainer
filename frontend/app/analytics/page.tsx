@@ -14,7 +14,13 @@ export default function AnalyticsPage() {
 
   const fetchAnalytics = async () => {
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+      const apiUrl = (() => {
+        const hostport = process.env.NEXT_PUBLIC_API_HOSTPORT
+        if (hostport) return `https://${hostport}`
+        const host = process.env.NEXT_PUBLIC_API_HOST
+        if (host) return `https://${host}`
+        return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+      })()
       // Fetch weekly stats
       const statsRes = await fetch(`${apiUrl}/api/analytics/weekly-stats`)
       const statsData = await statsRes.json()

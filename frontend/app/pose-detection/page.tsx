@@ -59,7 +59,13 @@ export default function PoseDetectionPage() {
 
   const fetchExercises = async () => {
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+      const apiUrl = (() => {
+        const hostport = process.env.NEXT_PUBLIC_API_HOSTPORT
+        if (hostport) return `https://${hostport}`
+        const host = process.env.NEXT_PUBLIC_API_HOST
+        if (host) return `https://${host}`
+        return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+      })()
       const response = await fetch(`${apiUrl}/api/pose/exercises`);
       const data = await response.json();
       setExercises(data.exercises || []);
@@ -70,7 +76,13 @@ export default function PoseDetectionPage() {
 
   const fetchStats = async () => {
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+      const apiUrl = (() => {
+        const hostport = process.env.NEXT_PUBLIC_API_HOSTPORT
+        if (hostport) return `https://${hostport}`
+        const host = process.env.NEXT_PUBLIC_API_HOST
+        if (host) return `https://${host}`
+        return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+      })()
       const response = await fetch(`${apiUrl}/api/pose/stats`);
       const data = await response.json();
       setStats(data);
@@ -82,7 +94,13 @@ export default function PoseDetectionPage() {
   const analyzeExercise = async () => {
     setLoading(true);
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+      const apiUrl = (() => {
+        const hostport = process.env.NEXT_PUBLIC_API_HOSTPORT
+        if (hostport) return `https://${hostport}`
+        const host = process.env.NEXT_PUBLIC_API_HOST
+        if (host) return `https://${host}`
+        return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+      })()
       const response = await fetch(`${apiUrl}/api/pose/analyze`, {
         method: "POST",
         headers: {
@@ -125,7 +143,13 @@ export default function PoseDetectionPage() {
         setFormScore(0);
         
         // Connect to WebSocket
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+        const apiUrl = (() => {
+          const hostport = process.env.NEXT_PUBLIC_API_HOSTPORT
+          if (hostport) return `https://${hostport}`
+          const host = process.env.NEXT_PUBLIC_API_HOST
+          if (host) return `https://${host}`
+          return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+        })()
         const wsUrl = apiUrl.replace(/^http/, 'ws') + '/ws/pose';
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
@@ -252,7 +276,13 @@ export default function PoseDetectionPage() {
         sets: Math.ceil(repCount / 10) // Assume 10 reps per set
       };
 
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+      const apiUrl = (() => {
+        const hostport = process.env.NEXT_PUBLIC_API_HOSTPORT
+        if (hostport) return `https://${hostport}`
+        const host = process.env.NEXT_PUBLIC_API_HOST
+        if (host) return `https://${host}`
+        return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+      })()
       const response = await fetch(`${apiUrl}/api/analytics/log-workout`, {
         method: 'POST',
         headers: {

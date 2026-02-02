@@ -21,8 +21,11 @@ services:
         value: exercisedb-api1.p.rapidapi.com
       - key: SPOONACULAR_API_KEY
         sync: false # User must provide this
-      - key: FRONTEND_URL
-        value: https://ai-fitness-frontend.onrender.com # Update after frontend deploy
+      - key: FRONTEND_HOST
+        fromService:
+          type: web
+          name: ai-fitness-frontend
+          property: host
 
   # Frontend Service
   - type: web
@@ -32,11 +35,16 @@ services:
     buildCommand: cd frontend && npm install && npm run build
     startCommand: cd frontend && npm start
     envVars:
-      - key: NEXT_PUBLIC_API_URL
+      - key: NEXT_PUBLIC_API_HOST
         fromService:
           type: web
           name: ai-fitness-backend
-          property: url
+          property: host
+      - key: NEXT_PUBLIC_API_HOSTPORT
+        fromService:
+          type: web
+          name: ai-fitness-backend
+          property: hostport
 
 databases:
   - name: ai-fitness-db

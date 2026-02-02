@@ -27,7 +27,13 @@ export default function WorkoutPage() {
   useEffect(() => {
     const fetchFilters = async () => {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+        const apiUrl = (() => {
+          const hostport = process.env.NEXT_PUBLIC_API_HOSTPORT
+          if (hostport) return `https://${hostport}`
+          const host = process.env.NEXT_PUBLIC_API_HOST
+          if (host) return `https://${host}`
+          return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+        })()
         const [bodyPartsRes, equipmentsRes] = await Promise.all([
           fetch(`${apiUrl}/api/workout/bodyparts`),
           fetch(`${apiUrl}/api/workout/equipments`)
@@ -51,7 +57,13 @@ export default function WorkoutPage() {
     const fetchExercises = async () => {
       setLoading(true)
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+        const apiUrl = (() => {
+          const hostport = process.env.NEXT_PUBLIC_API_HOSTPORT
+          if (hostport) return `https://${hostport}`
+          const host = process.env.NEXT_PUBLIC_API_HOST
+          if (host) return `https://${host}`
+          return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+        })()
         let url = `${apiUrl}/api/workout/exercises?limit=50`
         
         if (searchQuery) {

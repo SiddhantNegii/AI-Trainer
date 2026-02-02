@@ -17,7 +17,13 @@ export default function DietPage() {
     setError('')
     
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+      const apiUrl = (() => {
+        const hostport = process.env.NEXT_PUBLIC_API_HOSTPORT
+        if (hostport) return `https://${hostport}`
+        const host = process.env.NEXT_PUBLIC_API_HOST
+        if (host) return `https://${host}`
+        return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+      })()
       const response = await fetch(`${apiUrl}/api/diet/meal-plan/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
