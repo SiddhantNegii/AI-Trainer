@@ -17,4 +17,4 @@ httpx==0.26.0
 # Note: Using opencv-python-headless for server environments to avoid X11 dependencies
 opencv-python-headless==4.9.0.80
 mediapipe==0.10.32
-numpy==1.26.3
+numpy==1.24.4
