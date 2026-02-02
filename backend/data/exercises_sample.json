@@ -1,0 +1,74 @@
+{
+  "data": [
+    {
+      "id": "squat_bodyweight",
+      "name": "Bodyweight Squat",
+      "bodyParts": ["LEGS", "GLUTES"],
+      "equipments": ["BODYWEIGHT"],
+      "gifUrl": "https://example.com/gifs/squat.gif"
+    },
+    {
+      "id": "pushup_standard",
+      "name": "Push-up",
+      "bodyParts": ["CHEST", "TRICEPS", "SHOULDERS", "CORE"],
+      "equipments": ["BODYWEIGHT"],
+      "gifUrl": "https://example.com/gifs/pushup.gif"
+    },
+    {
+      "id": "plank_standard",
+      "name": "Plank",
+      "bodyParts": ["CORE", "SHOULDERS"],
+      "equipments": ["BODYWEIGHT"],
+      "gifUrl": "https://example.com/gifs/plank.gif"
+    },
+    {
+      "id": "deadlift_dumbbell",
+      "name": "Dumbbell Deadlift",
+      "bodyParts": ["BACK", "GLUTES", "HAMSTRINGS"],
+      "equipments": ["DUMBBELL"],
+      "gifUrl": "https://example.com/gifs/deadlift.gif"
+    },
+    {
+      "id": "benchpress_dumbbell",
+      "name": "Dumbbell Bench Press",
+      "bodyParts": ["CHEST", "TRICEPS", "SHOULDERS"],
+      "equipments": ["DUMBBELL"],
+      "gifUrl": "https://example.com/gifs/benchpress.gif"
+    },
+    {
+      "id": "row_barbell",
+      "name": "Barbell Row",
+      "bodyParts": ["BACK", "BICEPS"],
+      "equipments": ["BARBELL"],
+      "gifUrl": "https://example.com/gifs/row.gif"
+    },
+    {
+      "id": "shoulderpress_dumbbell",
+      "name": "Dumbbell Shoulder Press",
+      "bodyParts": ["SHOULDERS", "TRICEPS"],
+      "equipments": ["DUMBBELL"],
+      "gifUrl": "https://example.com/gifs/shoulderpress.gif"
+    },
+    {
+      "id": "lunge_bodyweight",
+      "name": "Walking Lunge",
+      "bodyParts": ["LEGS", "GLUTES"],
+      "equipments": ["BODYWEIGHT"],
+      "gifUrl": "https://example.com/gifs/lunge.gif"
+    },
+    {
+      "id": "bicepcurl_dumbbell",
+      "name": "Dumbbell Bicep Curl",
+      "bodyParts": ["BICEPS"],
+      "equipments": ["DUMBBELL"],
+      "gifUrl": "https://example.com/gifs/bicepcurl.gif"
+    },
+    {
+      "id": "latpulldown_cable",
+      "name": "Lat Pulldown",
+      "bodyParts": ["BACK", "BICEPS"],
+      "equipments": ["CABLE"],
+      "gifUrl": "https://example.com/gifs/latpulldown.gif"
+    }
+  ]
+}
