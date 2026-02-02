@@ -57,6 +57,9 @@ async def get_exercises(
                 response.raise_for_status()
                 data = response.json()
                 exercises = data.get("data", []) or data.get("data", [])
+                for ex in exercises:
+                    if "gifUrl" in ex and "imageUrl" not in ex:
+                        ex["imageUrl"] = ex["gifUrl"]
         else:
             exercises = load_local_exercises()[offset:offset+limit]
         return {"success": True, "total": len(exercises), "exercises": exercises}
@@ -88,6 +91,9 @@ async def search_exercises(
                 response.raise_for_status()
                 data = response.json()
                 exercises = data.get("data", []) or data.get("data", [])
+                for ex in exercises:
+                    if "gifUrl" in ex and "imageUrl" not in ex:
+                        ex["imageUrl"] = ex["gifUrl"]
         else:
             exercises = load_local_exercises()
             exercises = [ex for ex in exercises if query.lower() in ex.get("name", "").lower()][:limit]
@@ -122,6 +128,9 @@ async def get_exercises_by_bodypart(
                 response.raise_for_status()
                 data = response.json()
                 exercises = data.get("data", []) or data.get("data", [])
+                for ex in exercises:
+                    if "gifUrl" in ex and "imageUrl" not in ex:
+                        ex["imageUrl"] = ex["gifUrl"]
         else:
             exercises = load_local_exercises()
         bodypart_upper = bodypart.upper()
@@ -163,6 +172,9 @@ async def get_exercises_by_equipment(
                 response.raise_for_status()
                 data = response.json()
                 exercises = data.get("data", []) or data.get("data", [])
+                for ex in exercises:
+                    if "gifUrl" in ex and "imageUrl" not in ex:
+                        ex["imageUrl"] = ex["gifUrl"]
         else:
             exercises = load_local_exercises()
         equipment_upper = equipment.upper()
@@ -200,6 +212,8 @@ async def get_exercise_by_id(exercise_id: str):
             response = await client.get(url, headers=headers or None, timeout=30.0)
             response.raise_for_status()
             data = response.json()
+            if isinstance(data, dict) and "gifUrl" in data and "imageUrl" not in data:
+                data["imageUrl"] = data["gifUrl"]
             return {"success": True, "exercise": data}
     
     except httpx.HTTPError as e:
