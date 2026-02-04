@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import './globals.css'
+import AIDoctorBot from '../components/AIDoctorBot'
 
 export const metadata: Metadata = {
   title: 'AI Fitness Trainer - Transform Your Fitness Journey',
@@ -13,7 +14,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="scroll-smooth">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased"><AIDoctorBot />{children}</body>
     </html>
   )
 }

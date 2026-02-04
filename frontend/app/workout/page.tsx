@@ -42,8 +42,22 @@ export default function WorkoutPage() {
         const bodyPartsData = await bodyPartsRes.json()
         const equipmentsData = await equipmentsRes.json()
         
-        if (bodyPartsData.success) setBodyParts(bodyPartsData.bodyParts)
-        if (equipmentsData.success) setEquipments(equipmentsData.equipments)
+        if (bodyPartsData.success) {
+          const bp = bodyPartsData.bodyParts ?? bodyPartsData.data ?? []
+          // Ensure we have an array of strings
+          const bodyPartsArray = Array.isArray(bp) 
+            ? bp.map(item => typeof item === 'string' ? item : String(item)).filter(Boolean)
+            : []
+          setBodyParts(bodyPartsArray)
+        }
+        if (equipmentsData.success) {
+          const eq = equipmentsData.equipments ?? equipmentsData.data ?? []
+          // Ensure we have an array of strings
+          const equipmentsArray = Array.isArray(eq)
+            ? eq.map(item => typeof item === 'string' ? item : String(item)).filter(Boolean)
+            : []
+          setEquipments(equipmentsArray)
+        }
       } catch (error) {
         console.error('Error fetching filters:', error)
       }
@@ -76,18 +90,36 @@ export default function WorkoutPage() {
         
         const response = await fetch(url)
         const data = await response.json()
+        if (typeof window !== 'undefined') {
+          console.log('Workout fetch URL:', url)
+          console.log('Workout raw response:', data)
+        }
         
         if (data.success) {
-          setExercises(data.exercises || [])
+          let list: any[] = []
+          if (Array.isArray(data.exercises)) list = data.exercises
+          else if (Array.isArray(data.data)) list = data.data
+          else if (data.data && Array.isArray(data.data.exercises)) list = data.data.exercises
+          
+          if (!Array.isArray(list)) list = []
+          setExercises(list)
+        } else {
+          setExercises([])
         }
       } catch (error) {
         console.error('Error fetching exercises:', error)
+        setExercises([])
       } finally {
         setLoading(false)
       }
     }
     
-    fetchExercises()
+    // Debounce search queries
+    const timeoutId = setTimeout(() => {
+      fetchExercises()
+    }, searchQuery ? 500 : 0) // 500ms debounce for search, immediate for filters
+    
+    return () => clearTimeout(timeoutId)
   }, [searchQuery, selectedBodyPart, selectedEquipment])
 
   const handleSearch = (e: React.FormEvent) => {
@@ -144,16 +176,19 @@ export default function WorkoutPage() {
               <select
                 value={selectedBodyPart}
                 onChange={(e) => {
-                  setSelectedBodyPart(e.target.value)
-                  setSelectedEquipment('')
-                  setSearchQuery('')
+                  const value = e.target.value
+                  setSelectedBodyPart(value)
+                  if (value) {
+                    setSelectedEquipment('')
+                    setSearchQuery('')
+                  }
                 }}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
               >
                 <option value="">All Body Parts</option>
                 {bodyParts.map((part) => (
                   <option key={part} value={part}>
-                    {part.charAt(0) + part.slice(1).toLowerCase()}
+                    {part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()}
                   </option>
                 ))}
               </select>
@@ -164,16 +199,19 @@ export default function WorkoutPage() {
               <select
                 value={selectedEquipment}
                 onChange={(e) => {
-                  setSelectedEquipment(e.target.value)
-                  setSelectedBodyPart('')
-                  setSearchQuery('')
+                  const value = e.target.value
+                  setSelectedEquipment(value)
+                  if (value) {
+                    setSelectedBodyPart('')
+                    setSearchQuery('')
+                  }
                 }}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
               >
                 <option value="">All Equipment</option>
                 {equipments.map((equipment) => (
                   <option key={equipment} value={equipment}>
-                    {equipment.charAt(0) + equipment.slice(1).toLowerCase()}
+                    {equipment.charAt(0).toUpperCase() + equipment.slice(1).toLowerCase()}
                   </option>
                 ))}
               </select>
