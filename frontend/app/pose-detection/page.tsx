@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import TopNav from '../../components/TopNav'
 import Footer from '../../components/Footer'
 import BottomCTA from '../../components/BottomCTA'
+import { useAuthFetch } from '../../utils/authFetch'
 import {
   ExerciseAnalyzer,
   POSE_CONNECTIONS,
@@ -62,6 +63,8 @@ export default function PoseDetectionPage() {
     stage: null,
   })
 
+  const authFetch = useAuthFetch()
+
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const analyzerRef = useRef<ExerciseAnalyzer>(new ExerciseAnalyzer())
@@ -69,6 +72,10 @@ export default function PoseDetectionPage() {
   const rafRef = useRef<number | null>(null)
   const lastVideoTimeRef = useRef<number>(-1)
   const streamRef = useRef<MediaStream | null>(null)
+  const sessionStartRef = useRef<number | null>(null)
+  const formScoreSumRef = useRef<number>(0)
+  const formScoreSamplesRef = useRef<number>(0)
+  const [savedToast, setSavedToast] = useState<string | null>(null)
 
   useEffect(() => {
     analyzerRef.current.setExercise(selectedExercise)
@@ -128,6 +135,9 @@ export default function PoseDetectionPage() {
       setAnalysis({ feedback: [], score: 0, reps: 0, stage: null })
       setCameraActive(true)
       setConnectionState('live')
+      sessionStartRef.current = Date.now()
+      formScoreSumRef.current = 0
+      formScoreSamplesRef.current = 0
       loop(landmarker)
     } catch (err) {
       console.error('Camera/landmarker error:', err)
@@ -155,6 +165,10 @@ export default function PoseDetectionPage() {
           if (landmarks) {
             const a = analyzerRef.current.analyze(landmarks)
             setAnalysis(a)
+            if (a.score > 0) {
+              formScoreSumRef.current += a.score
+              formScoreSamplesRef.current += 1
+            }
             drawSkeleton(canvas, video, landmarks)
           } else {
             drawSkeleton(canvas, video, null)
@@ -205,7 +219,7 @@ export default function PoseDetectionPage() {
     })
   }
 
-  const stopCamera = () => {
+  const stopCamera = async () => {
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current)
       rafRef.current = null
@@ -221,6 +235,37 @@ export default function PoseDetectionPage() {
     }
     setCameraActive(false)
     setConnectionState('idle')
+
+    const reps = analyzerRef.current.getRepCount()
+    const avgScore =
+      formScoreSamplesRef.current > 0
+        ? Math.round(formScoreSumRef.current / formScoreSamplesRef.current)
+        : 0
+    const duration = sessionStartRef.current
+      ? Math.round((Date.now() - sessionStartRef.current) / 1000)
+      : 0
+
+    const shouldLog =
+      duration >= 5 && (reps > 0 || (selectedExercise === 'plank' && duration >= 10))
+    if (!shouldLog) return
+
+    try {
+      const res = await authFetch('/api/sessions', {
+        method: 'POST',
+        body: JSON.stringify({
+          exercise: selectedExercise,
+          reps,
+          form_score: avgScore,
+          duration_seconds: duration,
+        }),
+      })
+      if (res.ok) {
+        setSavedToast('SESSION SAVED →')
+        setTimeout(() => setSavedToast(null), 2500)
+      }
+    } catch (err) {
+      console.error('Save session error:', err)
+    }
   }
 
   const resetCounter = () => {
@@ -261,7 +306,7 @@ export default function PoseDetectionPage() {
             </p>
           </div>
           <span className={`font-label-caps text-label-caps ${statusPill.color}`}>
-            {statusPill.label}
+            {savedToast ?? statusPill.label}
           </span>
         </section>
 

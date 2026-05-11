@@ -2,6 +2,13 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import {
+  SignedIn,
+  SignedOut,
+  SignInButton,
+  SignUpButton,
+  UserButton,
+} from '@clerk/nextjs'
 
 const NAV_LINKS: { label: string; href: string }[] = [
   { label: 'DASHBOARD', href: '/dashboard' },
@@ -47,19 +54,34 @@ export default function TopNav() {
         })}
       </nav>
 
-      <div className="flex items-center gap-6">
-        <Link
-          href="/settings"
-          className="font-label-caps text-label-caps uppercase text-secondary hover:text-primary-fixed transition-colors hidden sm:inline-block"
-        >
-          PROFILE
-        </Link>
-        <Link
-          href="/dashboard"
-          className="bg-primary-fixed text-on-primary-fixed px-4 sm:px-6 py-2 font-label-caps text-label-caps rounded-full active:scale-95 transition-transform"
-        >
-          GET STARTED
-        </Link>
+      <div className="flex items-center gap-4 md:gap-6">
+        <SignedIn>
+          <Link
+            href="/settings"
+            className="font-label-caps text-label-caps uppercase text-secondary hover:text-primary-fixed transition-colors hidden sm:inline-block"
+          >
+            PROFILE
+          </Link>
+          <UserButton
+            appearance={{
+              elements: {
+                avatarBox: 'w-9 h-9 rounded-full border-2 border-primary-fixed',
+              },
+            }}
+          />
+        </SignedIn>
+        <SignedOut>
+          <SignInButton mode="modal">
+            <button className="font-label-caps text-label-caps uppercase text-secondary hover:text-primary-fixed transition-colors hidden sm:inline-block">
+              SIGN IN
+            </button>
+          </SignInButton>
+          <SignUpButton mode="modal">
+            <button className="bg-primary-fixed text-on-primary-fixed px-4 sm:px-6 py-2 font-label-caps text-label-caps rounded-full active:scale-95 transition-transform">
+              GET STARTED
+            </button>
+          </SignUpButton>
+        </SignedOut>
       </div>
     </header>
   )

@@ -32,6 +32,10 @@ services:
       # - key: EXERCISEDB_API_HOST      (e.g. exercisedb-api1.p.rapidapi.com)
       # - key: EXERCISEDB_API_KEY       (your RapidAPI key)
       # - key: SPOONACULAR_API_KEY      (your Spoonacular key)
+      # Clerk (required for /api/profile, /api/sessions, /api/me):
+      # - key: CLERK_ISSUER             (e.g. https://your-app.clerk.accounts.dev)
+      # - key: CLERK_SECRET_KEY         (sk_test_... from Clerk dashboard)
+      # - key: CLERK_JWKS_URL           (optional override; derived from CLERK_ISSUER)
 
   - type: web
     name: ai-trainer-frontend
@@ -44,4 +48,6 @@ services:
       - key: NODE_VERSION
         value: "20"
       # Set manually in the Render dashboard. See note above.
-      # - key: NEXT_PUBLIC_API_HOST     (e.g. ai-trainer-backend-zglc.onrender.com)
+      # - key: NEXT_PUBLIC_API_HOST           (e.g. ai-trainer-backend-zglc.onrender.com)
+      # - key: NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY  (pk_test_... from Clerk)
+      # - key: CLERK_SECRET_KEY                   (sk_test_... — needed for middleware)
