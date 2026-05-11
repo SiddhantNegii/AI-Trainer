@@ -20,20 +20,18 @@ services:
         fromDatabase:
           name: ai-trainer-db
           property: connectionString
-      - key: FRONTEND_HOST
-        fromService:
-          type: web
-          name: ai-trainer-frontend
-          property: host
       - key: SECRET_KEY
         generateValue: true
       - key: LOG_LEVEL
         value: INFO
-      - key: EXERCISEDB_API_HOST
-        value: exercisedb-api1.p.rapidapi.com
-      # Set these manually in the Render dashboard (do not commit real values):
-      # - key: EXERCISEDB_API_KEY
-      # - key: SPOONACULAR_API_KEY
+      # The following must be set manually in the Render dashboard.
+      # We don't manage them here because Render's `fromService.host` returns
+      # the full URL (https://...) instead of a bare hostname, which breaks
+      # the code's https:// prepending logic.
+      # - key: FRONTEND_HOST            (e.g. ai-trainer-frontend.onrender.com)
+      # - key: EXERCISEDB_API_HOST      (e.g. exercisedb-api1.p.rapidapi.com)
+      # - key: EXERCISEDB_API_KEY       (your RapidAPI key)
+      # - key: SPOONACULAR_API_KEY      (your Spoonacular key)
 
   - type: web
     name: ai-trainer-frontend
@@ -45,8 +43,5 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "20"
-      - key: NEXT_PUBLIC_API_HOST
-        fromService:
-          type: web
-          name: ai-trainer-backend
-          property: host
+      # Set manually in the Render dashboard. See note above.
+      # - key: NEXT_PUBLIC_API_HOST     (e.g. ai-trainer-backend-zglc.onrender.com)
