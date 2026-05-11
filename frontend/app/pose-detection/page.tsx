@@ -67,15 +67,18 @@ export default function PoseDetectionPage() {
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const analyzerRef = useRef<ExerciseAnalyzer>(new ExerciseAnalyzer())
   const landmarkerRef = useRef<unknown | null>(null)
   const rafRef = useRef<number | null>(null)
   const lastVideoTimeRef = useRef<number>(-1)
   const streamRef = useRef<MediaStream | null>(null)
+  const demoBlobUrlRef = useRef<string | null>(null)
   const sessionStartRef = useRef<number | null>(null)
   const formScoreSumRef = useRef<number>(0)
   const formScoreSamplesRef = useRef<number>(0)
   const [savedToast, setSavedToast] = useState<string | null>(null)
+  const [isDemo, setIsDemo] = useState(false)
 
   useEffect(() => {
     analyzerRef.current.setExercise(selectedExercise)
@@ -88,6 +91,10 @@ export default function PoseDetectionPage() {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop())
         streamRef.current = null
+      }
+      if (demoBlobUrlRef.current) {
+        URL.revokeObjectURL(demoBlobUrlRef.current)
+        demoBlobUrlRef.current = null
       }
     }
   }, [])
@@ -144,6 +151,61 @@ export default function PoseDetectionPage() {
       setErrorMsg('Could not start camera. Grant permission and reload.')
       setConnectionState('error')
     }
+  }
+
+  const triggerDemoPicker = () => {
+    fileInputRef.current?.click()
+  }
+
+  const startDemoVideo = async (file: File) => {
+    setErrorMsg(null)
+    setConnectionState('loading')
+    try {
+      const landmarker = (await initLandmarker()) as {
+        detectForVideo: (video: HTMLVideoElement, ts: number) => { landmarks: Point[][] }
+      }
+
+      // If a camera stream is running, stop it first.
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop())
+        streamRef.current = null
+      }
+      if (demoBlobUrlRef.current) {
+        URL.revokeObjectURL(demoBlobUrlRef.current)
+        demoBlobUrlRef.current = null
+      }
+
+      const blobUrl = URL.createObjectURL(file)
+      demoBlobUrlRef.current = blobUrl
+
+      const video = videoRef.current
+      if (!video) throw new Error('Video element not available')
+      video.srcObject = null
+      video.src = blobUrl
+      video.muted = true
+      video.loop = true
+      await video.play()
+
+      analyzerRef.current.reset()
+      setAnalysis({ feedback: [], score: 0, reps: 0, stage: null })
+      setCameraActive(true)
+      setIsDemo(true)
+      setConnectionState('live')
+      sessionStartRef.current = Date.now()
+      formScoreSumRef.current = 0
+      formScoreSamplesRef.current = 0
+      loop(landmarker)
+    } catch (err) {
+      console.error('Demo video error:', err)
+      setErrorMsg('Could not play that video. Try MP4, WebM, or MOV.')
+      setConnectionState('error')
+    }
+  }
+
+  const onDemoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) startDemoVideo(file)
+    e.target.value = '' // allow choosing the same file again next time
   }
 
   const loop = (landmarker: {
@@ -228,13 +290,28 @@ export default function PoseDetectionPage() {
       streamRef.current.getTracks().forEach((t) => t.stop())
       streamRef.current = null
     }
-    if (videoRef.current) videoRef.current.srcObject = null
+    if (videoRef.current) {
+      videoRef.current.pause()
+      videoRef.current.srcObject = null
+      videoRef.current.removeAttribute('src')
+      videoRef.current.load()
+    }
+    if (demoBlobUrlRef.current) {
+      URL.revokeObjectURL(demoBlobUrlRef.current)
+      demoBlobUrlRef.current = null
+    }
     if (canvasRef.current) {
       const ctx = canvasRef.current.getContext('2d')
       if (ctx) ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
     }
+
+    const wasDemo = isDemo
     setCameraActive(false)
+    setIsDemo(false)
     setConnectionState('idle')
+
+    // Demo sessions don't get logged — would skew real progress data.
+    if (wasDemo) return
 
     const reps = analyzerRef.current.getRepCount()
     const avgScore =
@@ -284,6 +361,7 @@ export default function PoseDetectionPage() {
     if (connectionState === 'loading')
       return { label: '● LOADING MODEL', color: 'text-on-surface-variant' }
     if (!cameraActive) return { label: '○ CAMERA OFF', color: 'text-on-surface-variant' }
+    if (isDemo) return { label: '● DEMO MODE', color: 'text-primary-fixed' }
     return { label: '● LIVE', color: 'text-primary-fixed' }
   })()
 
@@ -340,6 +418,25 @@ export default function PoseDetectionPage() {
                 >
                   {connectionState === 'loading' ? 'LOADING MODEL…' : 'START SESSION'}
                 </button>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="video/*"
+                  onChange={onDemoFileChange}
+                  className="hidden"
+                />
+                <button
+                  onClick={triggerDemoPicker}
+                  disabled={connectionState === 'loading'}
+                  className="mt-6 font-label-caps text-label-caps text-secondary border-b border-outline-variant/40 pb-1 hover:text-primary-fixed hover:border-primary-fixed transition-colors disabled:opacity-60"
+                >
+                  LOAD A DEMO VIDEO →
+                </button>
+                <span className="mt-2 font-label-caps text-[10px] text-on-surface-variant tracking-wider">
+                  FOR TESTING / PRESENTATION — NOT SAVED TO HISTORY
+                </span>
+
                 {errorMsg && (
                   <p className="mt-6 font-label-caps text-label-caps text-signal max-w-md">
                     {errorMsg}
