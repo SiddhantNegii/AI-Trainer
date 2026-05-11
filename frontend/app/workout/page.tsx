@@ -1,26 +1,26 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import TopNav from '../../components/TopNav'
+import Footer from '../../components/Footer'
+import BottomCTA from '../../components/BottomCTA'
+import { getApiUrl } from '../../utils/api'
 
 interface Exercise {
   exerciseId: string
   name: string
   imageUrl: string
+  gifUrl?: string
   bodyParts: string[]
   equipments: string[]
-  exerciseType: string
-  keywords: string[]
+  exerciseType?: string
+  targetMuscles?: string[]
+  secondaryMuscles?: string[]
+  keywords?: string[]
+  instructions?: string[]
 }
 
 const PAGE_SIZE = 24
-
-function getApiUrl(): string {
-  const hostport = process.env.NEXT_PUBLIC_API_HOSTPORT
-  if (hostport) return `https://${hostport}`
-  const host = process.env.NEXT_PUBLIC_API_HOST
-  if (host) return `https://${host}`
-  return process.env.NEXT_PUBLIC_API_URL || ''
-}
 
 export default function WorkoutPage() {
   const [exercises, setExercises] = useState<Exercise[]>([])
@@ -37,37 +37,34 @@ export default function WorkoutPage() {
   const [equipments, setEquipments] = useState<string[]>([])
   const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null)
 
-  // Load body-part and equipment dropdown options once.
   useEffect(() => {
     const fetchFilters = async () => {
       try {
         const apiUrl = getApiUrl()
-        const [bodyPartsRes, equipmentsRes] = await Promise.all([
+        const [bp, eq] = await Promise.all([
           fetch(`${apiUrl}/api/workout/bodyparts`),
           fetch(`${apiUrl}/api/workout/equipments`),
         ])
-        const bodyPartsData = await bodyPartsRes.json()
-        const equipmentsData = await equipmentsRes.json()
-        if (bodyPartsData.success && Array.isArray(bodyPartsData.bodyParts)) {
-          setBodyParts(bodyPartsData.bodyParts.filter((s: unknown) => typeof s === 'string'))
+        const bpData = await bp.json()
+        const eqData = await eq.json()
+        if (bpData.success && Array.isArray(bpData.bodyParts)) {
+          setBodyParts(bpData.bodyParts.filter((s: unknown) => typeof s === 'string'))
         }
-        if (equipmentsData.success && Array.isArray(equipmentsData.equipments)) {
-          setEquipments(equipmentsData.equipments.filter((s: unknown) => typeof s === 'string'))
+        if (eqData.success && Array.isArray(eqData.equipments)) {
+          setEquipments(eqData.equipments.filter((s: unknown) => typeof s === 'string'))
         }
       } catch (err) {
-        console.error('Error fetching filter options:', err)
+        console.error('Filter options error:', err)
       }
     }
     fetchFilters()
   }, [])
 
-  // Unified fetch — handles both initial load and "Load More".
   const fetchExercises = useCallback(
     async (offset: number, append: boolean) => {
       if (append) setLoadingMore(true)
       else setLoading(true)
       setError(null)
-
       try {
         const apiUrl = getApiUrl()
         const params = new URLSearchParams({
@@ -77,17 +74,15 @@ export default function WorkoutPage() {
         if (searchQuery.trim()) params.set('search', searchQuery.trim())
         if (selectedBodyPart) params.set('bodypart', selectedBodyPart)
         if (selectedEquipment) params.set('equipment', selectedEquipment)
-
         const res = await fetch(`${apiUrl}/api/workout/exercises?${params.toString()}`)
         if (!res.ok) throw new Error(`Request failed with ${res.status}`)
         const data = await res.json()
-
         const list: Exercise[] = Array.isArray(data.exercises) ? data.exercises : []
         setExercises((prev) => (append ? [...prev, ...list] : list))
         setTotal(typeof data.total === 'number' ? data.total : list.length)
         setHasMore(Boolean(data.has_more))
       } catch (err) {
-        console.error('Error fetching exercises:', err)
+        console.error('Fetch exercises error:', err)
         setError('Could not load exercises. Please try again.')
         if (!append) setExercises([])
       } finally {
@@ -98,7 +93,6 @@ export default function WorkoutPage() {
     [searchQuery, selectedBodyPart, selectedEquipment],
   )
 
-  // Re-fetch from page 1 whenever filters change. Debounce only for the search input.
   useEffect(() => {
     const delay = searchQuery ? 400 : 0
     const timer = setTimeout(() => fetchExercises(0, false), delay)
@@ -108,319 +102,379 @@ export default function WorkoutPage() {
   const handleLoadMore = () => {
     if (!loadingMore && hasMore) fetchExercises(exercises.length, true)
   }
-
   const resetFilters = () => {
     setSearchQuery('')
     setSelectedBodyPart('')
     setSelectedEquipment('')
   }
-
   const activeFilterCount =
     (searchQuery ? 1 : 0) + (selectedBodyPart ? 1 : 0) + (selectedEquipment ? 1 : 0)
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      <header className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <a href="/dashboard" className="text-indigo-600 hover:text-indigo-700 font-medium">
-                ← Dashboard
-              </a>
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                Exercise Library
-              </h1>
-            </div>
-            <div className="text-sm text-gray-600">
-              {loading ? (
-                'Loading…'
-              ) : (
-                <>
-                  Showing <span className="font-semibold">{exercises.length}</span> of{' '}
-                  <span className="font-semibold">{total}</span>
-                </>
-              )}
-            </div>
+    <div className="bg-background text-on-background min-h-screen">
+      <TopNav />
+
+      <main className="pt-24 pb-0">
+        {/* HEADER */}
+        <section className="px-margin-mobile lg:px-margin-desktop py-12 border-b border-outline-variant/20 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+          <div>
+            <h1 className="font-display-xl text-[48px] md:text-[64px] leading-none text-primary uppercase">
+              EXERCISE LIBRARY
+            </h1>
+            <p className="font-body-lg text-body-lg text-secondary mt-3">
+              250+ exercises. Filter, search, learn.
+            </p>
           </div>
-        </div>
-      </header>
+          <p className="font-label-caps text-label-caps text-on-surface-variant uppercase">
+            {loading
+              ? 'LOADING…'
+              : `SHOWING ${exercises.length} OF ${total}`}
+          </p>
+        </section>
 
-      <main className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-        {/* Search and Filters */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="md:col-span-2">
-              <input
-                type="text"
-                placeholder="Search exercises (e.g., squat, push, curl)..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              />
-            </div>
+        {/* SEARCH + FILTERS */}
+        <section className="bg-surface-container-low px-margin-mobile lg:px-margin-desktop py-8 border-b border-outline-variant/20 flex flex-col gap-6">
+          <div className="relative">
+            <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant">
+              search
+            </span>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="SEARCH EXERCISES..."
+              className="w-full bg-black border border-outline-variant/40 focus:border-primary-fixed text-primary placeholder-on-surface-variant font-label-caps text-label-caps tracking-widest pl-14 pr-4 py-4 outline-none transition-colors"
+            />
+          </div>
 
-            <div>
-              <select
-                value={selectedBodyPart}
-                onChange={(e) => setSelectedBodyPart(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white"
-              >
-                <option value="">All Body Parts</option>
-                {bodyParts.map((part) => (
-                  <option key={part} value={part}>
-                    {part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <select
-                value={selectedEquipment}
-                onChange={(e) => setSelectedEquipment(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white"
-              >
-                <option value="">All Equipment</option>
-                {equipments.map((equipment) => (
-                  <option key={equipment} value={equipment}>
-                    {equipment.charAt(0).toUpperCase() + equipment.slice(1).toLowerCase()}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div className="flex flex-col gap-4">
+            <FilterChipRow
+              label="BODY PART"
+              options={bodyParts}
+              value={selectedBodyPart}
+              onChange={setSelectedBodyPart}
+            />
+            <FilterChipRow
+              label="EQUIPMENT"
+              options={equipments}
+              value={selectedEquipment}
+              onChange={setSelectedEquipment}
+            />
           </div>
 
           {activeFilterCount > 0 && (
-            <div className="mt-4 flex items-center gap-2 flex-wrap">
-              <span className="text-sm text-gray-600">Active filters:</span>
+            <div className="flex items-center gap-3 flex-wrap pt-2">
+              <span className="font-label-caps text-label-caps text-on-surface-variant">
+                ACTIVE FILTERS:
+              </span>
               {searchQuery && (
-                <span className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm">
-                  Search: {searchQuery}
+                <span className="bg-primary-fixed text-on-primary-fixed font-label-caps text-label-caps px-3 py-1">
+                  SEARCH: {searchQuery.toUpperCase()}
                 </span>
               )}
               {selectedBodyPart && (
-                <span className="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm">
-                  {selectedBodyPart}
+                <span className="bg-primary-fixed text-on-primary-fixed font-label-caps text-label-caps px-3 py-1">
+                  {selectedBodyPart.toUpperCase()}
                 </span>
               )}
               {selectedEquipment && (
-                <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm">
-                  {selectedEquipment}
+                <span className="bg-primary-fixed text-on-primary-fixed font-label-caps text-label-caps px-3 py-1">
+                  {selectedEquipment.toUpperCase()}
                 </span>
               )}
               <button
                 onClick={resetFilters}
-                className="px-3 py-1 text-sm text-gray-600 hover:text-gray-900"
+                className="font-label-caps text-label-caps text-signal hover:text-white transition-colors"
               >
-                Clear all
+                CLEAR ALL ×
               </button>
             </div>
           )}
-        </div>
+        </section>
 
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
-            {error}
-          </div>
-        )}
+        {/* RESULTS */}
+        <section className="px-margin-mobile lg:px-margin-desktop py-12">
+          {error && (
+            <div className="mb-8 border-l-4 border-signal bg-surface-container p-6">
+              <p className="font-label-caps text-label-caps text-signal">{error}</p>
+            </div>
+          )}
 
-        {loading && (
-          <div className="text-center py-12">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-            <p className="mt-4 text-gray-600">Loading exercises...</p>
-          </div>
-        )}
-
-        {!loading && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {exercises.map((exercise) => (
-              <div
-                key={exercise.exerciseId}
-                onClick={() => setSelectedExercise(exercise)}
-                className="bg-white rounded-xl shadow-md hover:shadow-xl transition-all cursor-pointer overflow-hidden group"
-              >
-                <div className="relative h-48 bg-gradient-to-br from-indigo-100 to-purple-100 overflow-hidden">
-                  {exercise.imageUrl && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={exercise.imageUrl}
-                      alt={exercise.name}
-                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-                    />
-                  )}
-                </div>
-
-                <div className="p-4">
-                  <h3 className="font-semibold text-gray-900 mb-2 line-clamp-2 h-12">
-                    {exercise.name}
-                  </h3>
-
-                  <div className="flex flex-wrap gap-1 mb-2">
-                    {exercise.bodyParts.slice(0, 2).map((part) => (
-                      <span
-                        key={part}
-                        className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded text-xs font-medium"
-                      >
-                        {part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()}
-                      </span>
-                    ))}
-                  </div>
-
-                  <div className="flex flex-wrap gap-1">
-                    {exercise.equipments.slice(0, 1).map((equipment) => (
-                      <span
-                        key={equipment}
-                        className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs"
-                      >
-                        {equipment.charAt(0).toUpperCase() + equipment.slice(1).toLowerCase()}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="px-4 pb-4">
-                  <button className="w-full py-2 bg-indigo-600 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
-                    View Details
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {!loading && exercises.length > 0 && hasMore && (
-          <div className="mt-10 flex justify-center">
-            <button
-              onClick={handleLoadMore}
-              disabled={loadingMore}
-              className="px-8 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-semibold disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-            >
-              {loadingMore ? 'Loading…' : `Load more (${total - exercises.length} remaining)`}
-            </button>
-          </div>
-        )}
-
-        {!loading && exercises.length > 0 && !hasMore && (
-          <p className="mt-10 text-center text-sm text-gray-500">
-            You&apos;ve reached the end — {total} exercises total.
-          </p>
-        )}
-
-        {!loading && exercises.length === 0 && !error && (
-          <div className="text-center py-12 bg-white rounded-xl shadow-lg">
-            <div className="text-6xl mb-4">🔍</div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">No exercises found</h3>
-            <p className="text-gray-600 mb-4">Try adjusting your search or filters</p>
-            <button
-              onClick={resetFilters}
-              className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
-            >
-              Clear Filters
-            </button>
-          </div>
-        )}
-      </main>
-
-      {selectedExercise && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
-          onClick={() => setSelectedExercise(null)}
-        >
-          <div
-            className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-gray-900">{selectedExercise.name}</h2>
+          {loading ? (
+            <div className="py-24 text-center">
+              <p className="font-label-caps text-label-caps text-on-surface-variant">
+                LOADING EXERCISES…
+              </p>
+            </div>
+          ) : exercises.length === 0 ? (
+            <div className="py-24 text-center border border-outline-variant/30">
+              <p className="font-display-xl text-[40px] text-primary uppercase mb-4">
+                NO RESULTS
+              </p>
+              <p className="font-body-lg text-body-lg text-secondary mb-6">
+                Try a broader filter or clear all filters.
+              </p>
               <button
-                onClick={() => setSelectedExercise(null)}
-                className="text-gray-400 hover:text-gray-600 text-2xl"
+                onClick={resetFilters}
+                className="bg-primary-fixed text-on-primary-fixed font-label-caps text-label-caps px-8 py-4 active:scale-95 transition-transform"
               >
-                ×
+                CLEAR FILTERS
               </button>
             </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {exercises.map((ex) => (
+                <ExerciseTile
+                  key={ex.exerciseId}
+                  exercise={ex}
+                  onClick={() => setSelectedExercise(ex)}
+                />
+              ))}
+            </div>
+          )}
 
-            <div className="p-6">
-              <div className="relative h-64 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-xl overflow-hidden mb-6">
-                {selectedExercise.imageUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={selectedExercise.imageUrl}
-                    alt={selectedExercise.name}
-                    className="w-full h-full object-cover"
-                  />
-                )}
-              </div>
+          {!loading && exercises.length > 0 && hasMore && (
+            <div className="mt-12 flex justify-center">
+              <button
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="font-label-caps text-label-caps text-primary-fixed border-b border-primary-fixed pb-1 hover:text-white hover:border-white transition-colors disabled:opacity-50"
+              >
+                {loadingMore
+                  ? 'LOADING…'
+                  : `LOAD MORE (${total - exercises.length} REMAINING) →`}
+              </button>
+            </div>
+          )}
 
-              <div className="space-y-4">
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-600 uppercase mb-2">Body Parts</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedExercise.bodyParts.map((part) => (
-                      <span
-                        key={part}
-                        className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-medium"
-                      >
-                        {part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()}
-                      </span>
-                    ))}
-                  </div>
-                </div>
+          {!loading && exercises.length > 0 && !hasMore && (
+            <p className="mt-12 text-center font-label-caps text-label-caps text-on-surface-variant">
+              END OF LIBRARY — {total} EXERCISES TOTAL
+            </p>
+          )}
+        </section>
 
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-600 uppercase mb-2">Equipment</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedExercise.equipments.map((equipment) => (
-                      <span
-                        key={equipment}
-                        className="px-3 py-1 bg-gray-100 text-gray-700 rounded-lg text-sm"
-                      >
-                        {equipment.charAt(0).toUpperCase() + equipment.slice(1).toLowerCase()}
-                      </span>
-                    ))}
-                  </div>
-                </div>
+        <BottomCTA
+          headline="READY TO TRAIN?"
+          buttonLabel="START POSE SESSION"
+          href="/pose-detection"
+        />
+      </main>
 
-                {selectedExercise.exerciseType && (
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-600 uppercase mb-2">
-                      Exercise Type
-                    </h3>
-                    <span className="px-3 py-1 bg-green-100 text-green-700 rounded-lg text-sm font-medium">
-                      {selectedExercise.exerciseType}
-                    </span>
-                  </div>
-                )}
+      <Footer />
 
-                {selectedExercise.keywords && selectedExercise.keywords.length > 0 && (
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-600 uppercase mb-2">Tags</h3>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedExercise.keywords.slice(0, 8).map((keyword, index) => (
-                        <span
-                          key={index}
-                          className="px-2 py-1 bg-gray-50 text-gray-600 rounded text-xs"
-                        >
-                          {keyword}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+      {selectedExercise && (
+        <ExerciseDetailModal
+          exercise={selectedExercise}
+          onClose={() => setSelectedExercise(null)}
+        />
+      )}
+    </div>
+  )
+}
 
-              <div className="mt-6 flex gap-3">
-                <button className="flex-1 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-semibold">
-                  Add to Workout
-                </button>
-                <button className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-semibold">
-                  Save Favorite
-                </button>
+function FilterChipRow({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string
+  options: string[]
+  value: string
+  onChange: (v: string) => void
+}) {
+  return (
+    <div className="flex flex-col md:flex-row md:items-center gap-3">
+      <span className="font-label-caps text-label-caps text-on-surface-variant uppercase md:w-32 flex-shrink-0">
+        {label}
+      </span>
+      <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+        <FilterChip active={value === ''} onClick={() => onChange('')}>
+          ALL
+        </FilterChip>
+        {options.map((opt) => (
+          <FilterChip
+            key={opt}
+            active={value === opt}
+            onClick={() => onChange(value === opt ? '' : opt)}
+          >
+            {opt.toUpperCase()}
+          </FilterChip>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`font-label-caps text-label-caps px-4 py-2 border whitespace-nowrap transition-colors ${
+        active
+          ? 'bg-primary-fixed text-on-primary-fixed border-primary-fixed'
+          : 'text-secondary border-outline-variant/40 hover:text-primary-fixed hover:border-primary-fixed'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
+function ExerciseTile({
+  exercise,
+  onClick,
+}: {
+  exercise: Exercise
+  onClick: () => void
+}) {
+  const img = exercise.imageUrl || exercise.gifUrl || ''
+  const primaryBody = exercise.bodyParts?.[0] ?? ''
+  return (
+    <button
+      onClick={onClick}
+      className="group relative aspect-square overflow-hidden bg-surface-container text-left"
+    >
+      {img && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={img}
+          alt={exercise.name}
+          className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500"
+        />
+      )}
+      {primaryBody && (
+        <span className="absolute top-3 left-3 font-label-caps text-label-caps text-primary-fixed bg-black/80 px-2 py-1">
+          {primaryBody.toUpperCase()}
+        </span>
+      )}
+      <div className="absolute bottom-0 left-0 right-0 bg-black/90 border-t border-primary-fixed/60 px-4 py-3">
+        <span className="font-body-lg text-body-lg text-primary uppercase line-clamp-1">
+          {exercise.name}
+        </span>
+      </div>
+    </button>
+  )
+}
+
+function ExerciseDetailModal({
+  exercise,
+  onClose,
+}: {
+  exercise: Exercise
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handler)
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', handler)
+      document.body.style.overflow = ''
+    }
+  }, [onClose])
+
+  const img = exercise.imageUrl || exercise.gifUrl
+  const target = exercise.targetMuscles?.[0] ?? '—'
+  const equipment = exercise.equipments?.[0] ?? '—'
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] bg-black/85 flex items-center justify-center p-margin-mobile lg:p-margin-desktop"
+      onClick={onClose}
+    >
+      <div
+        className="bg-surface max-w-5xl w-full max-h-[90vh] overflow-y-auto border border-outline-variant/30"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sticky top-0 z-10 bg-surface border-b border-outline-variant/30 px-8 py-5 flex items-center justify-between">
+          <h2 className="font-display-xl text-[32px] md:text-[48px] leading-none text-primary-fixed uppercase">
+            {exercise.name}
+          </h2>
+          <button
+            onClick={onClose}
+            className="font-label-caps text-label-caps text-secondary hover:text-primary-fixed transition-colors"
+          >
+            CLOSE ×
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2">
+          <div className="aspect-square bg-black overflow-hidden">
+            {img && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={img} alt={exercise.name} className="w-full h-full object-cover" />
+            )}
+          </div>
+          <div className="p-8 flex flex-col gap-6">
+            <div>
+              <span className="font-label-caps text-label-caps text-on-surface-variant">
+                TARGET MUSCLE
+              </span>
+              <p className="font-headline-md text-headline-md text-primary uppercase mt-2">
+                {target}
+              </p>
+            </div>
+            <div className="border-t border-outline-variant/20 pt-6">
+              <span className="font-label-caps text-label-caps text-on-surface-variant">
+                EQUIPMENT
+              </span>
+              <p className="font-headline-md text-headline-md text-primary uppercase mt-2">
+                {equipment}
+              </p>
+            </div>
+            <div className="border-t border-outline-variant/20 pt-6">
+              <span className="font-label-caps text-label-caps text-on-surface-variant">
+                BODY PARTS
+              </span>
+              <div className="flex flex-wrap gap-2 mt-3">
+                {exercise.bodyParts?.map((bp) => (
+                  <span
+                    key={bp}
+                    className="font-label-caps text-label-caps text-primary-fixed border border-primary-fixed/40 px-3 py-1"
+                  >
+                    {bp.toUpperCase()}
+                  </span>
+                ))}
               </div>
             </div>
           </div>
         </div>
-      )}
+
+        {exercise.instructions && exercise.instructions.length > 0 && (
+          <div className="p-8 border-t border-outline-variant/20">
+            <span className="font-label-caps text-label-caps text-on-surface-variant">
+              HOW TO
+            </span>
+            <div className="mt-6 flex flex-col">
+              {exercise.instructions.map((step, i) => (
+                <div
+                  key={i}
+                  className="flex items-baseline gap-6 py-4 border-b border-outline-variant/20"
+                >
+                  <span className="font-display-xl text-[36px] leading-none text-primary-fixed w-12 flex-shrink-0">
+                    {(i + 1).toString().padStart(2, '0')}
+                  </span>
+                  <span className="font-body-md text-body-md text-primary">
+                    {step.replace(/^Step:?\d*\s*/i, '')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
