@@ -6,6 +6,7 @@ This backend serves: exercise library proxy, meal plan proxy, user profile,
 and workout-session history.
 """
 
+import asyncio
 import logging
 import os
 import sys
@@ -36,12 +37,28 @@ app = FastAPI(
 )
 
 
+async def _warm_exercise_cache() -> None:
+    """Pre-populate the in-memory exercise list so the first user request is instant."""
+    try:
+        from routes.workout import get_all_cached_exercises  # local import to avoid cycles
+
+        logger.info("Warming exercise cache in background...")
+        exercises = await get_all_cached_exercises()
+        logger.info("Exercise cache warm: %d exercises ready", len(exercises))
+    except Exception as e:
+        # Don't block startup if the upstream API is down — first user request will retry.
+        logger.warning("Exercise cache warmup failed: %s", e)
+
+
 @app.on_event("startup")
-def on_startup() -> None:
+async def on_startup() -> None:
     try:
         init_db()
     except Exception as e:
         logger.exception("Database init failed: %s", e)
+
+    # Fire-and-forget: warm the exercise cache so the /workout page loads instantly.
+    asyncio.create_task(_warm_exercise_cache())
 
 
 # CORS
