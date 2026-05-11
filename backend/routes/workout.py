@@ -213,208 +213,175 @@ async def clear_cache():
     
     return {"success": True, "message": "Cache cleared successfully"}
 
+# Maximum total exercises to fetch from upstream API (caps monthly API spend).
+# 250 = 10 pages of 25 = ~300 API calls/month worst case, well within RapidAPI free tier.
+MAX_EXERCISES_TO_FETCH = 250
+ALL_EXERCISES_CACHE_KEY = "__all__"
+
+
+async def get_all_cached_exercises() -> List[dict]:
+    """
+    Returns the full normalized exercise list, fetching from the API once per CACHE_TTL.
+    Subsequent calls hit memory. Filters/search/pagination operate on this in-memory list,
+    so there are no extra upstream API calls per user request.
+    """
+    cached = EXERCISES_CACHE.get(ALL_EXERCISES_CACHE_KEY)
+    if cached and time.time() - cached["ts"] < CACHE_TTL:
+        return cached["data"]
+
+    if not EXERCISEDB_API_HOST:
+        local = [normalize_exercise(ex) for ex in load_local_exercises()]
+        EXERCISES_CACHE[ALL_EXERCISES_CACHE_KEY] = {"data": local, "ts": time.time()}
+        return local
+
+    url = f"https://{EXERCISEDB_API_HOST}/api/v1/exercises"
+    headers = api_headers()
+    page_size = 25  # ExerciseDB's effective max per request
+    all_exercises: List[dict] = []
+    offset = 0
+
+    logger.info("Populating full exercise cache from ExerciseDB API...")
+    while offset < MAX_EXERCISES_TO_FETCH:
+        try:
+            response = await throttled_api_call(url, headers, {"limit": page_size, "offset": offset})
+            data = response.json()
+            page = data if isinstance(data, list) else (data.get("data") or data.get("exercises") or [])
+            if not page:
+                break
+            all_exercises.extend(normalize_exercise(ex) for ex in page)
+            if len(page) < page_size:
+                break  # short page means we hit the end
+            offset += page_size
+        except HTTPException as he:
+            if he.status_code == 429:
+                logger.warning("Rate limited mid-fetch at offset=%s; serving partial list of %d", offset, len(all_exercises))
+                break
+            raise
+        except Exception as e:
+            logger.exception("Error fetching page at offset=%s: %s", offset, e)
+            break
+
+    if not all_exercises:
+        all_exercises = [normalize_exercise(ex) for ex in load_local_exercises()]
+        logger.info("Falling back to local sample list (%d exercises)", len(all_exercises))
+
+    EXERCISES_CACHE[ALL_EXERCISES_CACHE_KEY] = {"data": all_exercises, "ts": time.time()}
+    save_persistent_cache()
+    logger.info("Cached %d exercises (good for %ds)", len(all_exercises), CACHE_TTL)
+    return all_exercises
+
+
+def _filter_exercises(
+    exercises: List[dict],
+    search: Optional[str],
+    bodypart: Optional[str],
+    equipment: Optional[str],
+) -> List[dict]:
+    """Filter the in-memory exercise list. All filters are case-insensitive and combine with AND."""
+    result = exercises
+    if search:
+        q = search.lower().strip()
+        result = [
+            ex for ex in result
+            if q in ex.get("name", "").lower()
+            or any(q in k.lower() for k in ex.get("keywords", []) or [])
+        ]
+    if bodypart:
+        bp = bodypart.lower().strip()
+        result = [ex for ex in result if any(bp == b.lower() for b in ex.get("bodyParts", []) or [])]
+    if equipment:
+        eq = equipment.lower().strip()
+        result = [ex for ex in result if any(eq == e.lower() for e in ex.get("equipments", []) or [])]
+    return result
+
+
 @router.get("/exercises")
 async def get_exercises(
     limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    search: Optional[str] = Query(None),
+    bodypart: Optional[str] = Query(None),
+    equipment: Optional[str] = Query(None),
 ):
     """
-    Get list of exercises from ExerciseDB API with intelligent caching
+    Unified exercise endpoint. Combines pagination, search, body-part filter, and equipment filter.
+    All filters operate against the in-memory cache populated once per 24h.
     """
-    cache_key = f"{limit}:{offset}"
-    
-    # Check cache first
-    if cache_key in EXERCISES_CACHE:
-        cached = EXERCISES_CACHE[cache_key]
-        if time.time() - cached["ts"] < CACHE_TTL:
-            logger.info(f"Using cached exercises (age: {int(time.time() - cached['ts'])}s)")
-            return {"success": True, "total": len(cached["data"]), "exercises": cached["data"]}
-    
     try:
-        logger.info("EXERCISEDB_API_HOST:", EXERCISEDB_API_HOST, "EXERCISEDB_API_KEY set:", bool(EXERCISEDB_API_KEY))
-        if EXERCISEDB_API_HOST:
-            url = f"https://{EXERCISEDB_API_HOST}/api/v1/exercises"
-            headers = api_headers()
-            params = {"limit": limit, "offset": offset}
-            
-            try:
-                response = await throttled_api_call(url, headers, params)
-                data = response.json()
-                if isinstance(data, list):
-                    exercises = data
-                else:
-                    exercises = data.get("data") or data.get("exercises") or []
-                exercises = [normalize_exercise(ex) for ex in exercises]
-                
-                # Cache the result
-                EXERCISES_CACHE[cache_key] = {"data": exercises, "ts": time.time()}
-                save_persistent_cache()
-                
-                logger.info(f"Fetched {len(exercises)} exercises from API")
-                return {"success": True, "total": len(exercises), "exercises": exercises}
-            except HTTPException as he:
-                if he.status_code == 429:
-                    logger.info("Rate limited, falling back to local data")
-                    exercises = load_local_exercises()[offset:offset+limit]
-                    exercises = [normalize_exercise(ex) for ex in exercises]
-                    return {"success": True, "total": len(exercises), "exercises": exercises, "source": "local_fallback"}
-                raise
-        else:
-            exercises = load_local_exercises()[offset:offset+limit]
-            exercises = [normalize_exercise(ex) for ex in exercises]
-        
-        return {"success": True, "total": len(exercises), "exercises": exercises}
-    
-    except httpx.HTTPError as e:
-        logger.info(f"API error: {e}, using local fallback")
-        exercises = load_local_exercises()[offset:offset+limit]
-        exercises = [normalize_exercise(ex) for ex in exercises]
-        return {"success": True, "total": len(exercises), "exercises": exercises, "source": "local_fallback"}
+        all_exercises = await get_all_cached_exercises()
+        filtered = _filter_exercises(all_exercises, search, bodypart, equipment)
+        page = filtered[offset:offset + limit]
+        return {
+            "success": True,
+            "total": len(filtered),
+            "offset": offset,
+            "limit": limit,
+            "has_more": offset + limit < len(filtered),
+            "exercises": page,
+        }
     except Exception as e:
-        logger.info(f"Unexpected error: {e}")
+        logger.exception("Error in /exercises: %s", e)
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
 @router.get("/exercises/search")
 async def search_exercises(
     query: str = Query(..., min_length=1),
-    limit: int = Query(20, ge=1, le=100)
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
 ):
-    """
-    Search exercises by name
-    """
-    try:
-        if EXERCISEDB_API_HOST:
-            url = f"https://{EXERCISEDB_API_HOST}/api/v1/exercises/search"
-            headers = api_headers()
-            params = {"search": query, "limit": limit}
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, headers=headers, params=params, timeout=30.0)
-                response.raise_for_status()
-                data = response.json()
-                if isinstance(data, list):
-                    exercises = data
-                else:
-                    exercises = data.get("data") or data.get("exercises") or []
-                exercises = [normalize_exercise(ex) for ex in exercises]
-        else:
-            exercises = load_local_exercises()
-            exercises = [ex for ex in exercises if query.lower() in ex.get("name", "").lower()][:limit]
-            exercises = [normalize_exercise(ex) for ex in exercises]
-        return {"success": True, "query": query, "total": len(exercises), "exercises": exercises}
-    
-    except httpx.HTTPError as e:
-        status = getattr(getattr(e, "response", None), "status_code", None)
-        if status == 429:
-            return {"success": True, "query": query, "total": 0, "exercises": []}
-        if FORCE_API:
-            raise HTTPException(status_code=502, detail=f"External API error: {str(e)}")
-        exercises = load_local_exercises()
-        exercises = [ex for ex in exercises if query.lower() in ex.get("name", "").lower()][:limit]
-        exercises = [normalize_exercise(ex) for ex in exercises]
-        return {"success": True, "query": query, "total": len(exercises), "exercises": exercises}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+    """Legacy search endpoint — routes to the unified /exercises endpoint logic."""
+    all_exercises = await get_all_cached_exercises()
+    filtered = _filter_exercises(all_exercises, search=query, bodypart=None, equipment=None)
+    return {
+        "success": True,
+        "query": query,
+        "total": len(filtered),
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + limit < len(filtered),
+        "exercises": filtered[offset:offset + limit],
+    }
 
 
 @router.get("/exercises/bodypart/{bodypart}")
 async def get_exercises_by_bodypart(
     bodypart: str,
-    limit: int = Query(100, ge=1, le=200)
+    limit: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0),
 ):
-    """
-    Get exercises filtered by body part (client-side filtering)
-    """
-    try:
-        # Fetch exercises and filter by body part
-        if EXERCISEDB_API_HOST:
-            url = f"https://{EXERCISEDB_API_HOST}/api/v1/exercises"
-            headers = api_headers()
-            params = {"limit": 100}
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, headers=headers, params=params, timeout=30.0)
-                response.raise_for_status()
-                data = response.json()
-                if isinstance(data, list):
-                    exercises = data
-                else:
-                    exercises = data.get("data") or data.get("exercises") or []
-                exercises = [normalize_exercise(ex) for ex in exercises]
-        else:
-            exercises = load_local_exercises()
-            exercises = [normalize_exercise(ex) for ex in exercises]
-        bodypart_upper = bodypart.upper()
-        
-        filtered_exercises = [
-            ex for ex in exercises 
-            if bodypart_upper in [bp.upper() for bp in ex.get("bodyParts", [])]
-        ][:limit]
-        
-        return {"success": True, "bodypart": bodypart, "total": len(filtered_exercises), "exercises": filtered_exercises}
-    
-    except httpx.HTTPError as e:
-        status = getattr(getattr(e, "response", None), "status_code", None)
-        if status == 429:
-            return {"success": True, "bodypart": bodypart, "total": 0, "exercises": []}
-        if FORCE_API:
-            raise HTTPException(status_code=502, detail=f"External API error: {str(e)}")
-        exercises = load_local_exercises()
-        exercises = [normalize_exercise(ex) for ex in exercises]
-        bodypart_upper = bodypart.upper()
-        filtered_exercises = [ex for ex in exercises if bodypart_upper in [bp.upper() for bp in ex.get("bodyParts", [])]][:limit]
-        return {"success": True, "bodypart": bodypart, "total": len(filtered_exercises), "exercises": filtered_exercises}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+    """Legacy body-part filter endpoint — routes to the unified /exercises endpoint logic."""
+    all_exercises = await get_all_cached_exercises()
+    filtered = _filter_exercises(all_exercises, search=None, bodypart=bodypart, equipment=None)
+    return {
+        "success": True,
+        "bodypart": bodypart,
+        "total": len(filtered),
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + limit < len(filtered),
+        "exercises": filtered[offset:offset + limit],
+    }
 
 
 @router.get("/exercises/equipment/{equipment}")
 async def get_exercises_by_equipment(
     equipment: str,
-    limit: int = Query(100, ge=1, le=200)
+    limit: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0),
 ):
-    """
-    Get exercises filtered by equipment (client-side filtering)
-    """
-    try:
-        # Fetch exercises and filter by equipment
-        if EXERCISEDB_API_HOST:
-            url = f"https://{EXERCISEDB_API_HOST}/api/v1/exercises"
-            headers = api_headers()
-            params = {"limit": 100}
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, headers=headers, params=params, timeout=30.0)
-                response.raise_for_status()
-                data = response.json()
-                if isinstance(data, list):
-                    exercises = data
-                else:
-                    exercises = data.get("data") or data.get("exercises") or []
-                exercises = [normalize_exercise(ex) for ex in exercises]
-        else:
-            exercises = load_local_exercises()
-            exercises = [normalize_exercise(ex) for ex in exercises]
-        equipment_upper = equipment.upper()
-        
-        filtered_exercises = [
-            ex for ex in exercises 
-            if equipment_upper in [eq.upper() for eq in ex.get("equipments", [])]
-        ][:limit]
-        
-        return {"success": True, "equipment": equipment, "total": len(filtered_exercises), "exercises": filtered_exercises}
-    
-    except httpx.HTTPError as e:
-        status = getattr(getattr(e, "response", None), "status_code", None)
-        if status == 429:
-            return {"success": True, "equipment": equipment, "total": 0, "exercises": []}
-        if FORCE_API:
-            raise HTTPException(status_code=502, detail=f"External API error: {str(e)}")
-        exercises = load_local_exercises()
-        exercises = [normalize_exercise(ex) for ex in exercises]
-        equipment_upper = equipment.upper()
-        filtered_exercises = [ex for ex in exercises if equipment_upper in [eq.upper() for eq in ex.get("equipments", [])]][:limit]
-        return {"success": True, "equipment": equipment, "total": len(filtered_exercises), "exercises": filtered_exercises}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+    """Legacy equipment filter endpoint — routes to the unified /exercises endpoint logic."""
+    all_exercises = await get_all_cached_exercises()
+    filtered = _filter_exercises(all_exercises, search=None, bodypart=None, equipment=equipment)
+    return {
+        "success": True,
+        "equipment": equipment,
+        "total": len(filtered),
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + limit < len(filtered),
+        "exercises": filtered[offset:offset + limit],
+    }
 
 
 @router.get("/exercises/{exercise_id}")
@@ -441,136 +408,18 @@ async def get_exercise_by_id(exercise_id: str):
 
 @router.get("/bodyparts")
 async def get_available_bodyparts():
-    """Get list of body parts - returns array of strings"""
-    global BODYPARTS_CACHE
-    
-    sys.stdout.flush()
-    logger.info("\n" + "="*50)
-    logger.info("BODYPARTS ENDPOINT CALLED")
-    logger.info("="*50)
-    
-    # Check cache first
-    if BODYPARTS_CACHE.get("data") and (time.time() - BODYPARTS_CACHE.get("ts", 0)) < CACHE_TTL:
-        cached = BODYPARTS_CACHE["data"]
-        # Ensure cached data is strings, not objects
-        if cached and isinstance(cached[0], dict):
-            cleaned = [item["name"] for item in cached if isinstance(item, dict) and "name" in item]
-            BODYPARTS_CACHE["data"] = cleaned
-            save_persistent_cache()
-            return {"success": True, "total": len(cleaned), "bodyParts": cleaned}
-        return {"success": True, "total": len(cached), "bodyParts": cached}
-    
-    # Fetch from API
-    try:
-        if not EXERCISEDB_API_HOST:
-            # Use local fallback
-            exercises = load_local_exercises()
-            parts = sorted(set(bp for ex in exercises for bp in ex.get("bodyParts", [])))
-            BODYPARTS_CACHE = {"data": parts, "ts": time.time()}
-            return {"success": True, "total": len(parts), "bodyParts": parts}
-        
-        url = f"https://{EXERCISEDB_API_HOST}/api/v1/bodyparts"
-        headers = api_headers()
-        response = await throttled_api_call(url, headers)
-        api_data = response.json()
-        
-        # Extract array from response
-        raw_list = api_data.get("data", api_data.get("bodyParts", []))
-        if not isinstance(raw_list, list):
-            raw_list = []
-        
-        # Extract strings from objects
-        result = []
-        for item in raw_list:
-            if isinstance(item, str):
-                result.append(item)
-            elif isinstance(item, dict) and "name" in item:
-                result.append(item["name"])
-        
-        logger.info(f"API returned {len(raw_list)} items, extracted {len(result)} strings")
-        
-        # Cache and return
-        BODYPARTS_CACHE = {"data": result, "ts": time.time()}
-        save_persistent_cache()
-        return {"success": True, "total": len(result), "bodyParts": result}
-        
-    except Exception as e:
-        logger.info(f"Error: {e}")
-        # Return fallback
-        parts = ["back", "chest", "shoulders", "arms", "legs", "core"]
-        return {"success": True, "total": len(parts), "bodyParts": parts}
-    except Exception as e:
-        logger.info(f"Error fetching bodyparts: {str(e)}")
-        # Return cached or fallback
-        if BODYPARTS_CACHE["data"]:
-            return {"success": True, "total": len(BODYPARTS_CACHE["data"]), "bodyParts": BODYPARTS_CACHE["data"]}
-        body_parts = [
-            "abductors", "abs", "adductors", "back", "biceps", "calves", "cardio",
-            "chest", "forearms", "glutes", "hamstrings", "lats", "lower back",
-            "neck", "quads", "shoulders", "traps", "triceps", "upper back"
-        ]
-        return {"success": True, "total": len(body_parts), "bodyParts": body_parts}
+    """List body parts derived from the cached exercise list (no extra API calls)."""
+    all_exercises = await get_all_cached_exercises()
+    parts = sorted({bp for ex in all_exercises for bp in (ex.get("bodyParts") or []) if isinstance(bp, str)})
+    return {"success": True, "total": len(parts), "bodyParts": parts}
 
 
 @router.get("/equipments")
 async def get_available_equipments():
-    """Get list of equipments - returns array of strings"""
-    global EQUIPMENTS_CACHE
-    
-    logger.info("\n" + "="*50)
-    logger.info("EQUIPMENTS ENDPOINT CALLED")
-    logger.info("="*50)
-    
-    # Check cache first
-    if EQUIPMENTS_CACHE.get("data") and (time.time() - EQUIPMENTS_CACHE.get("ts", 0)) < CACHE_TTL:
-        cached = EQUIPMENTS_CACHE["data"]
-        # Ensure cached data is strings, not objects
-        if cached and isinstance(cached[0], dict):
-            cleaned = [item["name"] for item in cached if isinstance(item, dict) and "name" in item]
-            EQUIPMENTS_CACHE["data"] = cleaned
-            save_persistent_cache()
-            return {"success": True, "total": len(cleaned), "equipments": cleaned}
-        return {"success": True, "total": len(cached), "equipments": cached}
-    
-    # Fetch from API
-    try:
-        if not EXERCISEDB_API_HOST:
-            # Use local fallback
-            exercises = load_local_exercises()
-            equip = sorted(set(eq for ex in exercises for eq in ex.get("equipments", [])))
-            EQUIPMENTS_CACHE = {"data": equip, "ts": time.time()}
-            return {"success": True, "total": len(equip), "equipments": equip}
-        
-        url = f"https://{EXERCISEDB_API_HOST}/api/v1/equipments"
-        headers = api_headers()
-        response = await throttled_api_call(url, headers)
-        api_data = response.json()
-        
-        # Extract array from response
-        raw_list = api_data.get("data", api_data.get("equipments", []))
-        if not isinstance(raw_list, list):
-            raw_list = []
-        
-        # Extract strings from objects
-        result = []
-        for item in raw_list:
-            if isinstance(item, str):
-                result.append(item)
-            elif isinstance(item, dict) and "name" in item:
-                result.append(item["name"])
-        
-        logger.info(f"API returned {len(raw_list)} items, extracted {len(result)} strings")
-        
-        # Cache and return
-        EQUIPMENTS_CACHE = {"data": result, "ts": time.time()}
-        save_persistent_cache()
-        return {"success": True, "total": len(result), "equipments": result}
-        
-    except Exception as e:
-        logger.info(f"Error: {e}")
-        # Return fallback
-        equip = ["barbell", "dumbbell", "kettlebell", "body weight", "cable", "machine"]
-        return {"success": True, "total": len(equip), "equipments": equip}
+    """List equipment derived from the cached exercise list (no extra API calls)."""
+    all_exercises = await get_all_cached_exercises()
+    equip = sorted({eq for ex in all_exercises for eq in (ex.get("equipments") or []) if isinstance(eq, str)})
+    return {"success": True, "total": len(equip), "equipments": equip}
 
 
 # ========== WORKOUT PLAN ENDPOINTS (ML Integration Pending) ==========
