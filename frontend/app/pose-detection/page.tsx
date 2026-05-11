@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import TopNav from '../../components/TopNav'
 import Footer from '../../components/Footer'
 import BottomCTA from '../../components/BottomCTA'
-import { getApiUrl, getWsUrl } from '../../utils/api'
+import { getWsUrl } from '../../utils/api'
 
 type ExerciseKey = 'squat' | 'pushup' | 'plank'
 
@@ -157,8 +157,7 @@ export default function PoseDetectionPage() {
     }, 300)
   }
 
-  const stopCamera = async () => {
-    if (repCount > 0) await saveWorkoutSession()
+  const stopCamera = () => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current)
       intervalRef.current = null
@@ -175,30 +174,6 @@ export default function PoseDetectionPage() {
     setCameraActive(false)
     setProcessingActive(false)
     setConnectionState('idle')
-  }
-
-  const saveWorkoutSession = async () => {
-    try {
-      const caloriesPerRep =
-        selectedExercise === 'squat' ? 8 : selectedExercise === 'pushup' ? 6 : 5
-      const workoutData = {
-        date: new Date().toISOString().split('T')[0],
-        exercise_type: selectedExercise,
-        duration_minutes: Math.max(5, repCount * 2),
-        calories_burned: repCount * caloriesPerRep,
-        intensity: Math.round(formScore / 10),
-        reps: repCount,
-        sets: Math.max(1, Math.ceil(repCount / 10)),
-      }
-      const apiUrl = getApiUrl()
-      await fetch(`${apiUrl}/api/analytics/log-workout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(workoutData),
-      })
-    } catch (err) {
-      console.error('Save workout error:', err)
-    }
   }
 
   const resetCounter = () => {

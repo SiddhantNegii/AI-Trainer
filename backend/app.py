@@ -26,7 +26,6 @@ from routes.workout import router as workout_router
 from routes.diet import router as diet_router
 from routes.auth import router as auth_router
 from routes.pose import router as pose_router
-from routes.analytics import router as analytics_router
 
 # Add ml_models to path for pose detection
 ml_models_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'ml_models', 'pose_detection'))
@@ -62,7 +61,6 @@ app.include_router(workout_router)
 app.include_router(diet_router)
 app.include_router(auth_router)
 app.include_router(pose_router)
-app.include_router(analytics_router)
 
 
 @app.websocket("/ws/pose")
@@ -169,7 +167,6 @@ async def root():
             "diet": "/api/diet",
             "auth": "/api/auth",
             "pose": "/api/pose",
-            "analytics": "/api/analytics",
             "docs": "/docs"
         }
     }
