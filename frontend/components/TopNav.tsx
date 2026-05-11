@@ -8,7 +8,6 @@ const NAV_LINKS: { label: string; href: string }[] = [
   { label: 'POSE DETECTION', href: '/pose-detection' },
   { label: 'NUTRITION', href: '/diet' },
   { label: 'LIBRARY', href: '/workout' },
-  { label: 'ANALYTICS', href: '/analytics' },
 ]
 
 export default function TopNav() {
