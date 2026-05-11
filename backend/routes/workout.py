@@ -9,6 +9,7 @@ from typing import List, Optional
 import httpx
 import os
 import asyncio
+import logging
 from dotenv import load_dotenv
 import time
 import json
@@ -17,6 +18,8 @@ from pathlib import Path
 import sys
 
 load_dotenv()
+
+logger = logging.getLogger("ai-trainer.workout")
 
 router = APIRouter(prefix="/api/workout", tags=["Workout"])
 
@@ -117,7 +120,7 @@ def load_persistent_cache():
                         if cleaned_bp:
                             cache_data['bodyparts']['data'] = cleaned_bp
                             BODYPARTS_CACHE = cache_data['bodyparts']
-                            print(f"Loaded and cleaned {len(cleaned_bp)} body parts from cache")
+                            logger.info(f"Loaded and cleaned {len(cleaned_bp)} body parts from cache")
                 
                 if cache_data.get('equipments'):
                     eq_data = cache_data['equipments'].get('data', [])
@@ -132,12 +135,12 @@ def load_persistent_cache():
                         if cleaned_eq:
                             cache_data['equipments']['data'] = cleaned_eq
                             EQUIPMENTS_CACHE = cache_data['equipments']
-                            print(f"Loaded and cleaned {len(cleaned_eq)} equipments from cache")
+                            logger.info(f"Loaded and cleaned {len(cleaned_eq)} equipments from cache")
                 
                 if cache_data.get('exercises'):
                     EXERCISES_CACHE = cache_data['exercises']
     except Exception as e:
-        print(f"Could not load persistent cache: {e}")
+        logger.info(f"Could not load persistent cache: {e}")
 
 def save_persistent_cache():
     """Save cache to disk"""
@@ -152,7 +155,7 @@ def save_persistent_cache():
         with open(PERSISTENT_CACHE_FILE, 'w', encoding='utf-8') as f:
             json.dump(cache_data, f)
     except Exception as e:
-        print(f"Could not save persistent cache: {e}")
+        logger.info(f"Could not save persistent cache: {e}")
 
 async def throttled_api_call(url: str, headers: Optional[dict], params: Optional[dict] = None, retry_count: int = 0):
     """Make API call with rate limiting and retry logic"""
@@ -171,7 +174,7 @@ async def throttled_api_call(url: str, headers: Optional[dict], params: Optional
                 if response.status_code == 429:
                     if retry_count < MAX_RETRIES:
                         retry_delay = RETRY_DELAYS[min(retry_count, len(RETRY_DELAYS) - 1)]
-                        print(f"Rate limited. Retrying in {retry_delay}s (attempt {retry_count + 1}/{MAX_RETRIES})")
+                        logger.info(f"Rate limited. Retrying in {retry_delay}s (attempt {retry_count + 1}/{MAX_RETRIES})")
                         await asyncio.sleep(retry_delay)
                         return await throttled_api_call(url, headers, params, retry_count + 1)
                     else:
@@ -182,18 +185,18 @@ async def throttled_api_call(url: str, headers: Optional[dict], params: Optional
         except httpx.HTTPError as e:
             if retry_count < MAX_RETRIES:
                 retry_delay = RETRY_DELAYS[min(retry_count, len(RETRY_DELAYS) - 1)]
-                print(f"API error: {e}. Retrying in {retry_delay}s")
+                logger.info(f"API error: {e}. Retrying in {retry_delay}s")
                 await asyncio.sleep(retry_delay)
                 return await throttled_api_call(url, headers, params, retry_count + 1)
             raise
 
 # Load cache on module import
-print("="*50)
-print("WORKOUT MODULE INITIALIZATION")
-print(f"EXERCISEDB_API_HOST: {EXERCISEDB_API_HOST}")
-print(f"EXERCISEDB_API_KEY set: {bool(EXERCISEDB_API_KEY)}")
-print(f"Cache file location: {PERSISTENT_CACHE_FILE}")
-print("="*50)
+logger.info("="*50)
+logger.info("WORKOUT MODULE INITIALIZATION")
+logger.info(f"EXERCISEDB_API_HOST: {EXERCISEDB_API_HOST}")
+logger.info(f"EXERCISEDB_API_KEY set: {bool(EXERCISEDB_API_KEY)}")
+logger.info(f"Cache file location: {PERSISTENT_CACHE_FILE}")
+logger.info("="*50)
 load_persistent_cache()
 
 @router.get("/clear-cache")
@@ -224,11 +227,11 @@ async def get_exercises(
     if cache_key in EXERCISES_CACHE:
         cached = EXERCISES_CACHE[cache_key]
         if time.time() - cached["ts"] < CACHE_TTL:
-            print(f"Using cached exercises (age: {int(time.time() - cached['ts'])}s)")
+            logger.info(f"Using cached exercises (age: {int(time.time() - cached['ts'])}s)")
             return {"success": True, "total": len(cached["data"]), "exercises": cached["data"]}
     
     try:
-        print("EXERCISEDB_API_HOST:", EXERCISEDB_API_HOST, "EXERCISEDB_API_KEY set:", bool(EXERCISEDB_API_KEY))
+        logger.info("EXERCISEDB_API_HOST:", EXERCISEDB_API_HOST, "EXERCISEDB_API_KEY set:", bool(EXERCISEDB_API_KEY))
         if EXERCISEDB_API_HOST:
             url = f"https://{EXERCISEDB_API_HOST}/api/v1/exercises"
             headers = api_headers()
@@ -247,11 +250,11 @@ async def get_exercises(
                 EXERCISES_CACHE[cache_key] = {"data": exercises, "ts": time.time()}
                 save_persistent_cache()
                 
-                print(f"Fetched {len(exercises)} exercises from API")
+                logger.info(f"Fetched {len(exercises)} exercises from API")
                 return {"success": True, "total": len(exercises), "exercises": exercises}
             except HTTPException as he:
                 if he.status_code == 429:
-                    print("Rate limited, falling back to local data")
+                    logger.info("Rate limited, falling back to local data")
                     exercises = load_local_exercises()[offset:offset+limit]
                     exercises = [normalize_exercise(ex) for ex in exercises]
                     return {"success": True, "total": len(exercises), "exercises": exercises, "source": "local_fallback"}
@@ -263,12 +266,12 @@ async def get_exercises(
         return {"success": True, "total": len(exercises), "exercises": exercises}
     
     except httpx.HTTPError as e:
-        print(f"API error: {e}, using local fallback")
+        logger.info(f"API error: {e}, using local fallback")
         exercises = load_local_exercises()[offset:offset+limit]
         exercises = [normalize_exercise(ex) for ex in exercises]
         return {"success": True, "total": len(exercises), "exercises": exercises, "source": "local_fallback"}
     except Exception as e:
-        print(f"Unexpected error: {e}")
+        logger.info(f"Unexpected error: {e}")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
@@ -442,9 +445,9 @@ async def get_available_bodyparts():
     global BODYPARTS_CACHE
     
     sys.stdout.flush()
-    print("\n" + "="*50, flush=True)
-    print("BODYPARTS ENDPOINT CALLED", flush=True)
-    print("="*50, flush=True)
+    logger.info("\n" + "="*50)
+    logger.info("BODYPARTS ENDPOINT CALLED")
+    logger.info("="*50)
     
     # Check cache first
     if BODYPARTS_CACHE.get("data") and (time.time() - BODYPARTS_CACHE.get("ts", 0)) < CACHE_TTL:
@@ -484,7 +487,7 @@ async def get_available_bodyparts():
             elif isinstance(item, dict) and "name" in item:
                 result.append(item["name"])
         
-        print(f"API returned {len(raw_list)} items, extracted {len(result)} strings", flush=True)
+        logger.info(f"API returned {len(raw_list)} items, extracted {len(result)} strings")
         
         # Cache and return
         BODYPARTS_CACHE = {"data": result, "ts": time.time()}
@@ -492,12 +495,12 @@ async def get_available_bodyparts():
         return {"success": True, "total": len(result), "bodyParts": result}
         
     except Exception as e:
-        print(f"Error: {e}", flush=True)
+        logger.info(f"Error: {e}")
         # Return fallback
         parts = ["back", "chest", "shoulders", "arms", "legs", "core"]
         return {"success": True, "total": len(parts), "bodyParts": parts}
     except Exception as e:
-        print(f"Error fetching bodyparts: {str(e)}")
+        logger.info(f"Error fetching bodyparts: {str(e)}")
         # Return cached or fallback
         if BODYPARTS_CACHE["data"]:
             return {"success": True, "total": len(BODYPARTS_CACHE["data"]), "bodyParts": BODYPARTS_CACHE["data"]}
@@ -514,9 +517,9 @@ async def get_available_equipments():
     """Get list of equipments - returns array of strings"""
     global EQUIPMENTS_CACHE
     
-    print("\n" + "="*50, flush=True)
-    print("EQUIPMENTS ENDPOINT CALLED", flush=True)
-    print("="*50, flush=True)
+    logger.info("\n" + "="*50)
+    logger.info("EQUIPMENTS ENDPOINT CALLED")
+    logger.info("="*50)
     
     # Check cache first
     if EQUIPMENTS_CACHE.get("data") and (time.time() - EQUIPMENTS_CACHE.get("ts", 0)) < CACHE_TTL:
@@ -556,7 +559,7 @@ async def get_available_equipments():
             elif isinstance(item, dict) and "name" in item:
                 result.append(item["name"])
         
-        print(f"API returned {len(raw_list)} items, extracted {len(result)} strings", flush=True)
+        logger.info(f"API returned {len(raw_list)} items, extracted {len(result)} strings")
         
         # Cache and return
         EQUIPMENTS_CACHE = {"data": result, "ts": time.time()}
@@ -564,7 +567,7 @@ async def get_available_equipments():
         return {"success": True, "total": len(result), "equipments": result}
         
     except Exception as e:
-        print(f"Error: {e}", flush=True)
+        logger.info(f"Error: {e}")
         # Return fallback
         equip = ["barbell", "dumbbell", "kettlebell", "body weight", "cable", "machine"]
         return {"success": True, "total": len(equip), "equipments": equip}

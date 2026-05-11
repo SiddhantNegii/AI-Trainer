@@ -64,7 +64,7 @@ export default function PoseDetectionPage() {
         if (hostport) return `https://${hostport}`
         const host = process.env.NEXT_PUBLIC_API_HOST
         if (host) return `https://${host}`
-        return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+        return process.env.NEXT_PUBLIC_API_URL || ''
       })()
       const response = await fetch(`${apiUrl}/api/pose/exercises`);
       const data = await response.json();
@@ -81,7 +81,7 @@ export default function PoseDetectionPage() {
         if (hostport) return `https://${hostport}`
         const host = process.env.NEXT_PUBLIC_API_HOST
         if (host) return `https://${host}`
-        return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+        return process.env.NEXT_PUBLIC_API_URL || ''
       })()
       const response = await fetch(`${apiUrl}/api/pose/stats`);
       const data = await response.json();
@@ -99,7 +99,7 @@ export default function PoseDetectionPage() {
         if (hostport) return `https://${hostport}`
         const host = process.env.NEXT_PUBLIC_API_HOST
         if (host) return `https://${host}`
-        return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+        return process.env.NEXT_PUBLIC_API_URL || ''
       })()
       const response = await fetch(`${apiUrl}/api/pose/analyze`, {
         method: "POST",
@@ -148,7 +148,7 @@ export default function PoseDetectionPage() {
           if (hostport) return `https://${hostport}`
           const host = process.env.NEXT_PUBLIC_API_HOST
           if (host) return `https://${host}`
-          return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+          return process.env.NEXT_PUBLIC_API_URL || ''
         })()
         const wsUrl = apiUrl.replace(/^http/, 'ws') + '/ws/pose';
         const ws = new WebSocket(wsUrl);
@@ -281,7 +281,7 @@ export default function PoseDetectionPage() {
         if (hostport) return `https://${hostport}`
         const host = process.env.NEXT_PUBLIC_API_HOST
         if (host) return `https://${host}`
-        return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+        return process.env.NEXT_PUBLIC_API_URL || ''
       })()
       const response = await fetch(`${apiUrl}/api/analytics/log-workout`, {
         method: 'POST',

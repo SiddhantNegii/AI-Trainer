@@ -32,7 +32,7 @@ export default function WorkoutPage() {
           if (hostport) return `https://${hostport}`
           const host = process.env.NEXT_PUBLIC_API_HOST
           if (host) return `https://${host}`
-          return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+          return process.env.NEXT_PUBLIC_API_URL || ''
         })()
         const [bodyPartsRes, equipmentsRes] = await Promise.all([
           fetch(`${apiUrl}/api/workout/bodyparts`),
@@ -76,7 +76,7 @@ export default function WorkoutPage() {
           if (hostport) return `https://${hostport}`
           const host = process.env.NEXT_PUBLIC_API_HOST
           if (host) return `https://${host}`
-          return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+          return process.env.NEXT_PUBLIC_API_URL || ''
         })()
         let url = `${apiUrl}/api/workout/exercises?limit=50`
         

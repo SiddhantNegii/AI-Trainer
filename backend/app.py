@@ -13,6 +13,13 @@ import json
 import base64
 import sys
 import os
+import logging
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("ai-trainer.app")
 
 # Import routers
 from routes.workout import router as workout_router
@@ -33,12 +40,15 @@ app = FastAPI(
 
 frontend_host = os.getenv("FRONTEND_HOST")
 frontend_url = os.getenv("FRONTEND_URL")
+extra_origins = [o.strip() for o in os.getenv("EXTRA_CORS_ORIGINS", "").split(",") if o.strip()]
 if frontend_host:
     allowed_origins = [f"https://{frontend_host}", f"http://{frontend_host}"]
 elif frontend_url:
     allowed_origins = [frontend_url]
 else:
-    allowed_origins = ["*"]
+    allowed_origins = ["http://localhost:3000"]
+allowed_origins.extend(extra_origins)
+logger.info("CORS allowed origins: %s", allowed_origins)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -61,9 +71,9 @@ async def websocket_pose_detection(websocket: WebSocket):
     WebSocket endpoint for real-time pose detection
     Receives video frames, processes with MediaPipe, returns analysis
     """
-    print("WebSocket connection attempt...")
+    logger.info("WebSocket connection attempt...")
     await websocket.accept()
-    print("WebSocket connected!")
+    logger.info("WebSocket connected")
     try:
         from pose_detector import PoseDetector
         from exercise_analyzer import ExerciseAnalyzer
@@ -137,9 +147,9 @@ async def websocket_pose_detection(websocket: WebSocket):
                 })
     
     except WebSocketDisconnect:
-        print("WebSocket disconnected")
+        logger.info("WebSocket disconnected")
     except Exception as e:
-        print(f"Error in websocket: {str(e)}")
+        logger.exception("Error in websocket: %s", e)
         await websocket.send_json({
             "error": str(e)
         })
@@ -174,4 +184,5 @@ async def health_check():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    port = int(os.getenv("PORT", "8002"))
+    uvicorn.run(app, host="0.0.0.0", port=port)
