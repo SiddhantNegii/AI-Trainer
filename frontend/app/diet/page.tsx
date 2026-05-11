@@ -10,9 +10,21 @@ interface Meal {
   id: number
   title: string
   image?: string
+  imageType?: string
   readyInMinutes?: number
   servings?: number
   sourceUrl?: string
+}
+
+function mealImageUrl(meal: Meal): string | null {
+  if (meal.image && meal.image.startsWith('http')) return meal.image
+  if (meal.id && meal.imageType) {
+    return `https://img.spoonacular.com/recipes/${meal.id}-556x370.${meal.imageType}`
+  }
+  if (meal.id) {
+    return `https://img.spoonacular.com/recipes/${meal.id}-556x370.jpg`
+  }
+  return null
 }
 
 interface Nutrients {
@@ -412,10 +424,10 @@ function MealBlock({ slot, meal }: { slot: string; meal: Meal }) {
         )}
       </div>
       <div className="md:col-span-2 aspect-square md:aspect-auto md:h-40 overflow-hidden bg-surface-container">
-        {meal.image && (
+        {mealImageUrl(meal) && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={meal.image}
+            src={mealImageUrl(meal) as string}
             alt={meal.title}
             className="w-full h-full object-cover grayscale hover:grayscale-0 transition-all duration-500"
           />
