@@ -4,17 +4,15 @@ import { useEffect, useRef, useState } from 'react'
 import TopNav from '../../components/TopNav'
 import Footer from '../../components/Footer'
 import BottomCTA from '../../components/BottomCTA'
-import { getWsUrl } from '../../utils/api'
+import {
+  ExerciseAnalyzer,
+  POSE_CONNECTIONS,
+  type ExerciseKey,
+  type AnalysisResult,
+  type Point,
+} from '../../utils/exerciseAnalyzer'
 
-type ExerciseKey = 'squat' | 'pushup' | 'plank'
-
-interface ExerciseInfo {
-  label: string
-  targetMuscles: string
-  steps: string[]
-}
-
-const EXERCISES: Record<ExerciseKey, ExerciseInfo> = {
+const EXERCISES: Record<ExerciseKey, { label: string; targetMuscles: string; steps: string[] }> = {
   squat: {
     label: 'SQUAT',
     targetMuscles: 'QUADS · GLUTES · HAMSTRINGS',
@@ -50,156 +48,202 @@ const EXERCISES: Record<ExerciseKey, ExerciseInfo> = {
   },
 }
 
+type ConnectionState = 'idle' | 'loading' | 'live' | 'error'
+
 export default function PoseDetectionPage() {
   const [selectedExercise, setSelectedExercise] = useState<ExerciseKey>('squat')
   const [cameraActive, setCameraActive] = useState(false)
-  const [processingActive, setProcessingActive] = useState(false)
-  const [repCount, setRepCount] = useState(0)
-  const [formScore, setFormScore] = useState(0)
-  const [currentFeedback, setCurrentFeedback] = useState<string[]>([])
-  const [connectionState, setConnectionState] = useState<
-    'idle' | 'live' | 'processing' | 'error'
-  >('idle')
+  const [connectionState, setConnectionState] = useState<ConnectionState>('idle')
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [analysis, setAnalysis] = useState<AnalysisResult>({
+    feedback: [],
+    score: 0,
+    reps: 0,
+    stage: null,
+  })
 
   const videoRef = useRef<HTMLVideoElement>(null)
-  const wsRef = useRef<WebSocket | null>(null)
-  const intervalRef = useRef<number | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const analyzerRef = useRef<ExerciseAnalyzer>(new ExerciseAnalyzer())
+  const landmarkerRef = useRef<unknown | null>(null)
+  const rafRef = useRef<number | null>(null)
+  const lastVideoTimeRef = useRef<number>(-1)
+  const streamRef = useRef<MediaStream | null>(null)
 
   useEffect(() => {
+    analyzerRef.current.setExercise(selectedExercise)
+  }, [selectedExercise])
+
+  useEffect(() => {
+    // Cleanup on unmount.
     return () => {
-      // cleanup on unmount
-      if (intervalRef.current) clearInterval(intervalRef.current)
-      if (wsRef.current) wsRef.current.close()
-      const v = videoRef.current
-      if (v?.srcObject) {
-        const stream = v.srcObject as MediaStream
-        stream.getTracks().forEach((t) => t.stop())
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop())
+        streamRef.current = null
       }
     }
   }, [])
 
+  const initLandmarker = async () => {
+    if (landmarkerRef.current) return landmarkerRef.current
+    const { FilesetResolver, PoseLandmarker } = await import('@mediapipe/tasks-vision')
+    const vision = await FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.10/wasm',
+    )
+    const landmarker = await PoseLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath:
+          'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+        delegate: 'GPU',
+      },
+      runningMode: 'VIDEO',
+      numPoses: 1,
+    })
+    landmarkerRef.current = landmarker
+    return landmarker
+  }
+
   const startCamera = async () => {
+    setErrorMsg(null)
+    setConnectionState('loading')
     try {
+      const landmarker = (await initLandmarker()) as {
+        detectForVideo: (
+          video: HTMLVideoElement,
+          ts: number,
+        ) => { landmarks: Point[][] }
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 640, height: 480 },
+        audio: false,
       })
+      streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
+        await videoRef.current.play()
       }
+      analyzerRef.current.reset()
+      setAnalysis({ feedback: [], score: 0, reps: 0, stage: null })
       setCameraActive(true)
-      setRepCount(0)
-      setFormScore(0)
-      setCurrentFeedback([])
-
-      const ws = new WebSocket(getWsUrl('/ws/pose'))
-      wsRef.current = ws
-
-      ws.onopen = () => {
-        setProcessingActive(true)
-        setConnectionState('live')
-        startFrameCapture()
-      }
-
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data)
-        if (data.type === 'analysis') {
-          setRepCount(data.rep_count || 0)
-          setFormScore(data.form_score || 0)
-          setCurrentFeedback(data.feedback || [])
-          setConnectionState('live')
-        } else if (data.error) {
-          setConnectionState('error')
-        }
-      }
-
-      ws.onerror = () => {
-        setProcessingActive(false)
-        setConnectionState('error')
-      }
-
-      ws.onclose = () => {
-        setProcessingActive(false)
-        setConnectionState((s) => (s === 'error' ? 'error' : 'idle'))
-      }
+      setConnectionState('live')
+      loop(landmarker)
     } catch (err) {
-      console.error('Camera error:', err)
+      console.error('Camera/landmarker error:', err)
+      setErrorMsg('Could not start camera. Grant permission and reload.')
       setConnectionState('error')
-      alert('Unable to access camera. Please grant camera permission.')
     }
   }
 
-  const startFrameCapture = () => {
-    if (intervalRef.current) return
-    const tempCanvas = document.createElement('canvas')
-    const tempCtx = tempCanvas.getContext('2d')
-    intervalRef.current = window.setInterval(() => {
-      if (
-        videoRef.current &&
-        wsRef.current?.readyState === WebSocket.OPEN &&
-        tempCtx
-      ) {
-        const video = videoRef.current
-        if (video.readyState === video.HAVE_ENOUGH_DATA) {
-          tempCanvas.width = video.videoWidth
-          tempCanvas.height = video.videoHeight
-          tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height)
-          const imageData = tempCanvas.toDataURL('image/jpeg', 0.5)
-          setConnectionState('processing')
-          wsRef.current.send(
-            JSON.stringify({
-              type: 'frame',
-              image: imageData,
-              exercise: selectedExercise,
-            }),
-          )
+  const loop = (landmarker: {
+    detectForVideo: (video: HTMLVideoElement, ts: number) => { landmarks: Point[][] }
+  }) => {
+    const tick = () => {
+      const video = videoRef.current
+      const canvas = canvasRef.current
+      if (!video || !canvas || video.readyState < 2) {
+        rafRef.current = requestAnimationFrame(tick)
+        return
+      }
+      const ts = performance.now()
+      if (video.currentTime !== lastVideoTimeRef.current) {
+        lastVideoTimeRef.current = video.currentTime
+        try {
+          const result = landmarker.detectForVideo(video, ts)
+          const landmarks = result.landmarks?.[0] ?? null
+          if (landmarks) {
+            const a = analyzerRef.current.analyze(landmarks)
+            setAnalysis(a)
+            drawSkeleton(canvas, video, landmarks)
+          } else {
+            drawSkeleton(canvas, video, null)
+          }
+        } catch (err) {
+          console.error('detectForVideo error:', err)
         }
       }
-    }, 300)
+      rafRef.current = requestAnimationFrame(tick)
+    }
+    rafRef.current = requestAnimationFrame(tick)
+  }
+
+  const drawSkeleton = (
+    canvas: HTMLCanvasElement,
+    video: HTMLVideoElement,
+    landmarks: Point[] | null,
+  ) => {
+    const w = video.videoWidth || 640
+    const h = video.videoHeight || 480
+    if (canvas.width !== w) canvas.width = w
+    if (canvas.height !== h) canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, w, h)
+    if (!landmarks) return
+
+    ctx.strokeStyle = '#cbf22b'
+    ctx.lineWidth = 3
+    ctx.fillStyle = '#cbf22b'
+
+    POSE_CONNECTIONS.forEach(([a, b]) => {
+      const pa = landmarks[a]
+      const pb = landmarks[b]
+      if (!pa || !pb) return
+      ctx.beginPath()
+      ctx.moveTo(pa.x * w, pa.y * h)
+      ctx.lineTo(pb.x * w, pb.y * h)
+      ctx.stroke()
+    })
+
+    landmarks.forEach((lm, i) => {
+      // only draw upper-body + leg landmarks for clarity (skip face details)
+      if (i < 11) return
+      ctx.beginPath()
+      ctx.arc(lm.x * w, lm.y * h, 4, 0, Math.PI * 2)
+      ctx.fill()
+    })
   }
 
   const stopCamera = () => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current)
-      intervalRef.current = null
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
     }
-    if (wsRef.current) {
-      wsRef.current.close()
-      wsRef.current = null
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop())
+      streamRef.current = null
     }
-    if (videoRef.current?.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream
-      stream.getTracks().forEach((track) => track.stop())
-      videoRef.current.srcObject = null
+    if (videoRef.current) videoRef.current.srcObject = null
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext('2d')
+      if (ctx) ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
     }
     setCameraActive(false)
-    setProcessingActive(false)
     setConnectionState('idle')
   }
 
   const resetCounter = () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'reset' }))
-    }
-    setRepCount(0)
-    setFormScore(0)
+    analyzerRef.current.reset()
+    setAnalysis({ feedback: [], score: 0, reps: 0, stage: null })
   }
 
   const changeExercise = (ex: ExerciseKey) => {
     setSelectedExercise(ex)
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'change_exercise', exercise: ex }))
-    }
   }
 
   const exerciseInfo = EXERCISES[selectedExercise]
 
   const statusPill = (() => {
+    if (errorMsg) return { label: '● ERROR', color: 'text-signal' }
+    if (connectionState === 'loading')
+      return { label: '● LOADING MODEL', color: 'text-on-surface-variant' }
     if (!cameraActive) return { label: '○ CAMERA OFF', color: 'text-on-surface-variant' }
-    if (connectionState === 'error') return { label: '● ERROR', color: 'text-signal' }
-    if (connectionState === 'processing')
-      return { label: '● PROCESSING', color: 'text-signal' }
     return { label: '● LIVE', color: 'text-primary-fixed' }
   })()
+
+  const formScore = analysis.score
+  const repCount = analysis.reps
 
   return (
     <div className="bg-background text-on-background min-h-screen">
@@ -213,7 +257,7 @@ export default function PoseDetectionPage() {
               POSE DETECTION
             </h1>
             <p className="font-body-lg text-body-lg text-secondary mt-3">
-              Real-time form scoring powered by MediaPipe.
+              Real-time form scoring powered by MediaPipe — running on-device.
             </p>
           </div>
           <span className={`font-label-caps text-label-caps ${statusPill.color}`}>
@@ -231,9 +275,13 @@ export default function PoseDetectionPage() {
               muted
               className="w-full h-full object-cover bg-black"
             />
+            <canvas
+              ref={canvasRef}
+              className="absolute inset-0 w-full h-full pointer-events-none"
+            />
 
             {!cameraActive && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-margin-mobile">
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-margin-mobile bg-black/40 backdrop-blur-sm">
                 <span className="font-label-caps text-label-caps text-on-surface-variant mb-4">
                   CAMERA INACTIVE
                 </span>
@@ -242,15 +290,21 @@ export default function PoseDetectionPage() {
                 </p>
                 <button
                   onClick={startCamera}
-                  className="bg-primary-fixed text-on-primary-fixed font-headline-md text-headline-md tracking-widest px-12 py-6 hover:bg-white hover:text-black transition-colors active:scale-95"
+                  disabled={connectionState === 'loading'}
+                  className="bg-primary-fixed text-on-primary-fixed font-headline-md text-headline-md tracking-widest px-12 py-6 hover:bg-white hover:text-black transition-colors active:scale-95 disabled:opacity-60"
                 >
-                  START SESSION
+                  {connectionState === 'loading' ? 'LOADING MODEL…' : 'START SESSION'}
                 </button>
+                {errorMsg && (
+                  <p className="mt-6 font-label-caps text-label-caps text-signal max-w-md">
+                    {errorMsg}
+                  </p>
+                )}
               </div>
             )}
 
             {/* TOP-LEFT FORM SCORE */}
-            <div className="absolute top-0 left-0 p-6 md:p-8 flex flex-col items-start z-10">
+            <div className="absolute top-0 left-0 p-6 md:p-8 flex flex-col items-start z-10 pointer-events-none">
               <span className="font-label-caps text-label-caps text-on-surface-variant">
                 FORM
               </span>
@@ -273,32 +327,30 @@ export default function PoseDetectionPage() {
               </div>
               <div className="mt-3 w-1 h-24 md:h-32 bg-white/20 relative">
                 <div
-                  className="absolute bottom-0 left-0 right-0 bg-primary-fixed transition-all duration-300"
+                  className="absolute bottom-0 left-0 right-0 bg-primary-fixed transition-all duration-150"
                   style={{ height: `${formScore}%` }}
                 />
               </div>
             </div>
 
             {/* TOP-RIGHT REPS */}
-            <div className="absolute top-0 right-0 p-6 md:p-8 flex flex-col items-end z-10 text-right">
+            <div className="absolute top-0 right-0 p-6 md:p-8 flex flex-col items-end z-10 text-right pointer-events-none">
               <span className="font-label-caps text-label-caps text-on-surface-variant">
                 REPS
               </span>
-              <div className="flex items-baseline gap-2">
-                <span
-                  className="font-data-point text-[80px] md:text-[144px] leading-none text-primary-fixed"
-                  style={{ textShadow: '0 2px 16px rgba(0,0,0,0.6)' }}
-                >
-                  {repCount}
-                </span>
-              </div>
+              <span
+                className="font-data-point text-[80px] md:text-[144px] leading-none text-primary-fixed"
+                style={{ textShadow: '0 2px 16px rgba(0,0,0,0.6)' }}
+              >
+                {repCount}
+              </span>
             </div>
 
-            {/* BOTTOM FEEDBACK TOAST */}
-            {cameraActive && currentFeedback.length > 0 && (
-              <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 bg-black/90 border-l-4 border-primary-fixed px-6 py-3 max-w-md animate-slide-down">
+            {/* FEEDBACK TOAST */}
+            {cameraActive && analysis.feedback.length > 0 && (
+              <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 bg-black/90 border-l-4 border-primary-fixed px-6 py-3 max-w-md pointer-events-none">
                 <span className="font-label-caps text-label-caps text-white">
-                  {currentFeedback[0].toUpperCase()}
+                  {analysis.feedback[0]}
                 </span>
               </div>
             )}
