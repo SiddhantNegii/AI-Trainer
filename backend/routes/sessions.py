@@ -1,9 +1,14 @@
 """
 Workout session logging + retrieval.
+
+Auto-purge policy: rows older than RETENTION_DAYS (default 7) are deleted
+per-user on every endpoint hit. Cheap, idempotent, keeps the free-tier DB small.
 """
 
+import logging
+import os
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -13,6 +18,8 @@ from sqlalchemy.orm import Session
 from auth.clerk import get_current_user
 from db import get_db
 from models.database import User, WorkoutSession
+
+logger = logging.getLogger("ai-trainer.sessions")
 
 router = APIRouter(prefix="/api/sessions", tags=["Sessions"])
 
@@ -24,6 +31,25 @@ ALLOWED_EXERCISES = {
     "bicep_curl",
     "shoulder_press",
 }
+
+RETENTION_DAYS = int(os.getenv("SESSION_RETENTION_DAYS", "7"))
+
+
+def _purge_old_sessions(db: Session, user_id: str) -> int:
+    """Delete this user's sessions older than RETENTION_DAYS. Returns count deleted."""
+    cutoff = datetime.utcnow() - timedelta(days=RETENTION_DAYS)
+    deleted = (
+        db.query(WorkoutSession)
+        .filter(
+            WorkoutSession.user_id == user_id,
+            WorkoutSession.created_at < cutoff,
+        )
+        .delete(synchronize_session=False)
+    )
+    if deleted > 0:
+        db.commit()
+        logger.info("Purged %d session(s) for user %s (older than %d days)", deleted, user_id, RETENTION_DAYS)
+    return deleted
 
 
 class SessionCreate(BaseModel):
@@ -58,6 +84,7 @@ def log_session(
 ):
     if body.exercise not in ALLOWED_EXERCISES:
         raise HTTPException(status_code=400, detail=f"Unknown exercise: {body.exercise}")
+    _purge_old_sessions(db, user.id)
     s = WorkoutSession(
         user_id=user.id,
         exercise=body.exercise,
@@ -85,6 +112,7 @@ def list_sessions(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _purge_old_sessions(db, user.id)
     q = (
         db.query(WorkoutSession)
         .filter(WorkoutSession.user_id == user.id)
@@ -110,6 +138,7 @@ def session_stats(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _purge_old_sessions(db, user.id)
     base = db.query(WorkoutSession).filter(WorkoutSession.user_id == user.id)
 
     total_sessions = base.count()

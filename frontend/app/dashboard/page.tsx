@@ -150,7 +150,7 @@ export default function DashboardPage() {
               {totalSessions}
             </span>
             <span className="font-label-caps text-label-caps text-on-surface-variant mt-4">
-              SESSIONS LOGGED
+              SESSIONS · LAST 7 DAYS
             </span>
           </div>
           <div className="py-12 border-b md:border-b-0 md:border-r border-outline-variant/20 flex flex-col items-start md:px-12">
