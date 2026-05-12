@@ -108,8 +108,17 @@ export default function DashboardPage() {
     'ATHLETE'
 
   const breakdownRows = stats
-    ? (['squat', 'pushup', 'plank'] as const).map((ex) => ({
-        exercise: ex.toUpperCase(),
+    ? (
+        [
+          'squat',
+          'pushup',
+          'plank',
+          'lunge',
+          'bicep_curl',
+          'shoulder_press',
+        ] as const
+      ).map((ex) => ({
+        exercise: ex.replace('_', ' ').toUpperCase(),
         sessions: stats.by_exercise[ex]?.sessions ?? 0,
         score: stats.by_exercise[ex]?.avg_score ?? 0,
       }))

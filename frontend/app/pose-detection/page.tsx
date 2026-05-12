@@ -19,6 +19,9 @@ const BRIEFINGS: Record<ExerciseKey, string> = {
   squat: 'Squat session. Feet shoulder-width apart. Lower with control.',
   pushup: 'Push-up session. Brace your core. Keep your back flat.',
   plank: 'Plank session. Body in a straight line. Breathe steady.',
+  lunge: 'Lunge session. Long stance. Lower the back knee with control.',
+  bicep_curl: 'Bicep curl. Elbows pinned. Curl with the biceps, not the back.',
+  shoulder_press: 'Shoulder press. Brace your core. Press straight overhead.',
 }
 
 // Spoken versions of the on-screen all-caps cues (lowercase reads more natural via TTS).
@@ -30,6 +33,13 @@ const FEEDBACK_SPOKEN: Record<string, string> = {
   'HIPS TOO LOW': 'Hips too low.',
   'HIPS TOO HIGH': 'Hips too high.',
   'NO POSE DETECTED': 'Step into the frame.',
+  'DROP DEEPER': 'Drop deeper.',
+  'KEEP TORSO UPRIGHT': 'Keep your torso upright.',
+  'FRONT KNEE PAST TOE': 'Knee is past your toe.',
+  'CURL HIGHER': 'Curl higher.',
+  'KEEP ELBOW STILL': 'Keep your elbow still.',
+  'PRESS HIGHER': 'Press higher.',
+  'STACK WRIST OVER ELBOW': 'Stack your wrist over your elbow.',
 }
 
 const EXERCISES: Record<ExerciseKey, { label: string; targetMuscles: string; steps: string[] }> = {
@@ -64,6 +74,39 @@ const EXERCISES: Record<ExerciseKey, { label: string; targetMuscles: string; ste
       'BODY FORMS A STRAIGHT LINE HEAD TO HEELS',
       'BRACE CORE, BREATHE STEADILY',
       'HOLD POSITION FOR THE TARGET DURATION',
+    ],
+  },
+  lunge: {
+    label: 'LUNGE',
+    targetMuscles: 'QUADS · GLUTES · HAMSTRINGS',
+    steps: [
+      'STAND TALL, FEET HIP-WIDTH APART',
+      'STEP ONE FOOT FORWARD INTO LONG STANCE',
+      'LOWER BACK KNEE TOWARD THE FLOOR',
+      'FRONT THIGH PARALLEL, KNEE OVER ANKLE',
+      'PUSH THROUGH FRONT HEEL TO STAND',
+    ],
+  },
+  bicep_curl: {
+    label: 'BICEP CURL',
+    targetMuscles: 'BICEPS · FOREARMS',
+    steps: [
+      'STAND TALL, ARMS AT YOUR SIDES',
+      'PALMS FORWARD, ELBOWS PINNED TO RIBS',
+      'CURL WEIGHT UP TOWARD SHOULDER',
+      'SQUEEZE BICEP AT THE TOP',
+      'LOWER UNDER CONTROL TO FULL EXTENSION',
+    ],
+  },
+  shoulder_press: {
+    label: 'SHOULDER PRESS',
+    targetMuscles: 'DELTOIDS · TRICEPS',
+    steps: [
+      'STAND TALL, FEET SHOULDER-WIDTH APART',
+      'WRISTS AT SHOULDER LEVEL, ELBOWS BENT',
+      'BRACE CORE, AVOID ARCHING LOWER BACK',
+      'PRESS STRAIGHT UP UNTIL ARMS LOCK OUT',
+      'LOWER UNDER CONTROL BACK TO SHOULDERS',
     ],
   },
 }

@@ -11,7 +11,13 @@ export interface Point {
   visibility?: number
 }
 
-export type ExerciseKey = 'squat' | 'pushup' | 'plank'
+export type ExerciseKey =
+  | 'squat'
+  | 'pushup'
+  | 'plank'
+  | 'lunge'
+  | 'bicep_curl'
+  | 'shoulder_press'
 
 export interface AnalysisResult {
   feedback: string[]
@@ -40,6 +46,9 @@ const THRESHOLDS = {
   squat: { kneeDown: 90, kneeUp: 160, backMin: 160, backMax: 200 },
   pushup: { elbowDown: 90, elbowUp: 160, bodyMin: 160, bodyMax: 200 },
   plank: { bodyMin: 165, bodyMax: 195 },
+  lunge: { kneeDown: 95, kneeUp: 160, backMin: 160, backMax: 200 },
+  bicep_curl: { elbowFlexed: 50, elbowExtended: 160, elbowDriftMax: 0.08 },
+  shoulder_press: { elbowDown: 95, elbowUp: 160, wristStackMax: 0.1 },
 }
 
 /**
@@ -91,7 +100,10 @@ export class ExerciseAnalyzer {
   analyze(landmarks: Point[] | null): AnalysisResult {
     if (this.exercise === 'squat') return this.analyzeSquat(landmarks)
     if (this.exercise === 'pushup') return this.analyzePushup(landmarks)
-    return this.analyzePlank(landmarks)
+    if (this.exercise === 'plank') return this.analyzePlank(landmarks)
+    if (this.exercise === 'lunge') return this.analyzeLunge(landmarks)
+    if (this.exercise === 'bicep_curl') return this.analyzeBicepCurl(landmarks)
+    return this.analyzeShoulderPress(landmarks)
   }
 
   private empty(): AnalysisResult {
@@ -214,6 +226,141 @@ export class ExerciseAnalyzer {
       score: Math.round(mean(components)),
       reps: this.repCount,
       stage: null,
+    }
+  }
+
+  private analyzeLunge(landmarks: Point[] | null): AnalysisResult {
+    const hip = getLm(landmarks, LM.LEFT_HIP)
+    const knee = getLm(landmarks, LM.LEFT_KNEE)
+    const ankle = getLm(landmarks, LM.LEFT_ANKLE)
+    const shoulder = getLm(landmarks, LM.LEFT_SHOULDER)
+    if (!hip || !knee || !ankle || !shoulder) return this.empty()
+
+    const kneeAngle = angle(hip, knee, ankle)
+    const backAngle = angle(shoulder, hip, knee)
+
+    const feedback: string[] = []
+    const components: number[] = []
+
+    if (kneeAngle < THRESHOLDS.lunge.kneeDown) {
+      if (this.stage !== 'down') this.stage = 'down'
+      components.push(100)
+    } else if (kneeAngle < 120) {
+      components.push(70)
+      feedback.push('DROP DEEPER')
+    } else {
+      if (this.stage === 'down') {
+        this.stage = 'up'
+        this.repCount += 1
+      }
+      components.push(50)
+    }
+
+    if (backAngle > THRESHOLDS.lunge.backMin && backAngle < THRESHOLDS.lunge.backMax) {
+      components.push(100)
+    } else {
+      components.push(50)
+      feedback.push('KEEP TORSO UPRIGHT')
+    }
+
+    if (knee.x - ankle.x < 0.1) {
+      components.push(100)
+    } else {
+      components.push(60)
+      feedback.push('FRONT KNEE PAST TOE')
+    }
+
+    return {
+      feedback,
+      score: Math.round(mean(components)),
+      reps: this.repCount,
+      stage: this.stage,
+    }
+  }
+
+  private analyzeBicepCurl(landmarks: Point[] | null): AnalysisResult {
+    const shoulder = getLm(landmarks, LM.LEFT_SHOULDER)
+    const elbow = getLm(landmarks, LM.LEFT_ELBOW)
+    const wrist = getLm(landmarks, LM.LEFT_WRIST)
+    if (!shoulder || !elbow || !wrist) return this.empty()
+
+    const elbowAngle = angle(shoulder, elbow, wrist)
+
+    const feedback: string[] = []
+    const components: number[] = []
+
+    if (elbowAngle < THRESHOLDS.bicep_curl.elbowFlexed) {
+      if (this.stage !== 'down') this.stage = 'down'
+      components.push(100)
+    } else if (elbowAngle < 110) {
+      components.push(70)
+      feedback.push('CURL HIGHER')
+    } else if (elbowAngle > THRESHOLDS.bicep_curl.elbowExtended) {
+      if (this.stage === 'down') {
+        this.stage = 'up'
+        this.repCount += 1
+      }
+      components.push(100)
+    } else {
+      components.push(70)
+    }
+
+    if (Math.abs(elbow.x - shoulder.x) < THRESHOLDS.bicep_curl.elbowDriftMax) {
+      components.push(100)
+    } else {
+      components.push(60)
+      feedback.push('KEEP ELBOW STILL')
+    }
+
+    return {
+      feedback,
+      score: Math.round(mean(components)),
+      reps: this.repCount,
+      stage: this.stage,
+    }
+  }
+
+  private analyzeShoulderPress(landmarks: Point[] | null): AnalysisResult {
+    const shoulder = getLm(landmarks, LM.LEFT_SHOULDER)
+    const elbow = getLm(landmarks, LM.LEFT_ELBOW)
+    const wrist = getLm(landmarks, LM.LEFT_WRIST)
+    if (!shoulder || !elbow || !wrist) return this.empty()
+
+    const elbowAngle = angle(shoulder, elbow, wrist)
+    // MediaPipe y is top-down: smaller y = higher on screen.
+    const wristAboveShoulder = wrist.y < shoulder.y
+
+    const feedback: string[] = []
+    const components: number[] = []
+
+    if (elbowAngle < THRESHOLDS.shoulder_press.elbowDown && !wristAboveShoulder) {
+      if (this.stage !== 'down') this.stage = 'down'
+      components.push(100)
+    } else if (elbowAngle > THRESHOLDS.shoulder_press.elbowUp && wristAboveShoulder) {
+      if (this.stage === 'down') {
+        this.stage = 'up'
+        this.repCount += 1
+      }
+      components.push(100)
+    } else {
+      components.push(70)
+      if (elbowAngle > THRESHOLDS.shoulder_press.elbowUp && !wristAboveShoulder) {
+        feedback.push('PRESS HIGHER')
+      }
+    }
+
+    if (Math.abs(wrist.x - elbow.x) < THRESHOLDS.shoulder_press.wristStackMax) {
+      components.push(100)
+    } else {
+      components.push(60)
+      feedback.push('STACK WRIST OVER ELBOW')
+    }
+
+    return {
+      feedback,
+      score: Math.round(mean(components)),
+      reps: this.repCount,
+      stage: this.stage,
     }
   }
 }

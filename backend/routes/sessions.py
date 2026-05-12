@@ -16,7 +16,14 @@ from models.database import User, WorkoutSession
 
 router = APIRouter(prefix="/api/sessions", tags=["Sessions"])
 
-ALLOWED_EXERCISES = {"squat", "pushup", "plank"}
+ALLOWED_EXERCISES = {
+    "squat",
+    "pushup",
+    "plank",
+    "lunge",
+    "bicep_curl",
+    "shoulder_press",
+}
 
 
 class SessionCreate(BaseModel):

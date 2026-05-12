@@ -47,7 +47,7 @@ class WorkoutSession(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    exercise = Column(String, nullable=False)  # 'squat' | 'pushup' | 'plank'
+    exercise = Column(String, nullable=False)  # 'squat' | 'pushup' | 'plank' | 'lunge' | 'bicep_curl' | 'shoulder_press'
     reps = Column(Integer, default=0, nullable=False)
     form_score = Column(Integer, default=0, nullable=False)  # 0..100
     duration_seconds = Column(Integer, default=0, nullable=False)
