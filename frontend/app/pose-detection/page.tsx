@@ -5,6 +5,8 @@ import TopNav from '../../components/TopNav'
 import Footer from '../../components/Footer'
 import BottomCTA from '../../components/BottomCTA'
 import { useAuthFetch } from '../../utils/authFetch'
+import { FeedbackSmoother } from '../../utils/feedbackSmoother'
+import { useSpeech } from '../../utils/speech'
 import {
   ExerciseAnalyzer,
   POSE_CONNECTIONS,
@@ -12,6 +14,23 @@ import {
   type AnalysisResult,
   type Point,
 } from '../../utils/exerciseAnalyzer'
+
+const BRIEFINGS: Record<ExerciseKey, string> = {
+  squat: 'Squat session. Feet shoulder-width apart. Lower with control.',
+  pushup: 'Push-up session. Brace your core. Keep your back flat.',
+  plank: 'Plank session. Body in a straight line. Breathe steady.',
+}
+
+// Spoken versions of the on-screen all-caps cues (lowercase reads more natural via TTS).
+const FEEDBACK_SPOKEN: Record<string, string> = {
+  'GO DEEPER': 'Go deeper.',
+  'KEEP BACK STRAIGHT': 'Keep your back straight.',
+  'KNEES TOO FORWARD': 'Knees too forward.',
+  'GO LOWER': 'Go lower.',
+  'HIPS TOO LOW': 'Hips too low.',
+  'HIPS TOO HIGH': 'Hips too high.',
+  'NO POSE DETECTED': 'Step into the frame.',
+}
 
 const EXERCISES: Record<ExerciseKey, { label: string; targetMuscles: string; steps: string[] }> = {
   squat: {
@@ -69,6 +88,7 @@ export default function PoseDetectionPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const analyzerRef = useRef<ExerciseAnalyzer>(new ExerciseAnalyzer())
+  const smootherRef = useRef<FeedbackSmoother>(new FeedbackSmoother(30, 0.5))
   const landmarkerRef = useRef<unknown | null>(null)
   const rafRef = useRef<number | null>(null)
   const lastVideoTimeRef = useRef<number>(-1)
@@ -79,6 +99,8 @@ export default function PoseDetectionPage() {
   const formScoreSamplesRef = useRef<number>(0)
   const [savedToast, setSavedToast] = useState<string | null>(null)
   const [isDemo, setIsDemo] = useState(false)
+
+  const speech = useSpeech(true)
 
   useEffect(() => {
     analyzerRef.current.setExercise(selectedExercise)
@@ -139,12 +161,15 @@ export default function PoseDetectionPage() {
         await videoRef.current.play()
       }
       analyzerRef.current.reset()
+      smootherRef.current.reset()
+      speech.reset()
       setAnalysis({ feedback: [], score: 0, reps: 0, stage: null })
       setCameraActive(true)
       setConnectionState('live')
       sessionStartRef.current = Date.now()
       formScoreSumRef.current = 0
       formScoreSamplesRef.current = 0
+      speech.speak(BRIEFINGS[selectedExercise], { force: true })
       loop(landmarker)
     } catch (err) {
       console.error('Camera/landmarker error:', err)
@@ -187,6 +212,8 @@ export default function PoseDetectionPage() {
       await video.play()
 
       analyzerRef.current.reset()
+      smootherRef.current.reset()
+      speech.reset()
       setAnalysis({ feedback: [], score: 0, reps: 0, stage: null })
       setCameraActive(true)
       setIsDemo(true)
@@ -194,6 +221,7 @@ export default function PoseDetectionPage() {
       sessionStartRef.current = Date.now()
       formScoreSumRef.current = 0
       formScoreSamplesRef.current = 0
+      speech.speak(BRIEFINGS[selectedExercise], { force: true })
       loop(landmarker)
     } catch (err) {
       console.error('Demo video error:', err)
@@ -225,14 +253,22 @@ export default function PoseDetectionPage() {
           const result = landmarker.detectForVideo(video, ts)
           const landmarks = result.landmarks?.[0] ?? null
           if (landmarks) {
-            const a = analyzerRef.current.analyze(landmarks)
-            setAnalysis(a)
-            if (a.score > 0) {
-              formScoreSumRef.current += a.score
+            const raw = analyzerRef.current.analyze(landmarks)
+            const stable = smootherRef.current.push(raw.feedback)
+            const smoothed: AnalysisResult = { ...raw, feedback: stable }
+            setAnalysis(smoothed)
+            if (raw.score > 0) {
+              formScoreSumRef.current += raw.score
               formScoreSamplesRef.current += 1
             }
+            // Voice: only consider the most-stable message (smoother sorts by frequency).
+            const primary = stable[0] ?? null
+            speech.considerFeedback(primary ? FEEDBACK_SPOKEN[primary] ?? primary : null)
+            speech.considerRepMilestone(raw.reps)
             drawSkeleton(canvas, video, landmarks)
           } else {
+            smootherRef.current.push([])
+            speech.considerFeedback(null)
             drawSkeleton(canvas, video, null)
           }
         } catch (err) {
@@ -309,6 +345,8 @@ export default function PoseDetectionPage() {
     setCameraActive(false)
     setIsDemo(false)
     setConnectionState('idle')
+    speech.reset()
+    smootherRef.current.reset()
 
     // Demo sessions don't get logged — would skew real progress data.
     if (wasDemo) return
@@ -520,7 +558,23 @@ export default function PoseDetectionPage() {
                 )
               })}
             </div>
-            <div className="flex gap-3 justify-end">
+            <div className="flex gap-3 justify-end items-center">
+              {speech.isSupported && (
+                <button
+                  onClick={() => speech.setEnabled((v) => !v)}
+                  className={`font-label-caps text-label-caps border px-6 py-3 transition-colors ${
+                    speech.enabled
+                      ? 'text-primary-fixed border-primary-fixed'
+                      : 'text-secondary border-outline-variant hover:text-primary-fixed hover:border-primary-fixed'
+                  }`}
+                  title={speech.enabled ? 'Mute voice cues' : 'Enable voice cues'}
+                >
+                  <span className="material-symbols-outlined align-middle text-base mr-1">
+                    {speech.enabled ? 'volume_up' : 'volume_off'}
+                  </span>
+                  {speech.enabled ? 'VOICE ON' : 'VOICE OFF'}
+                </button>
+              )}
               {cameraActive && (
                 <>
                   <button
