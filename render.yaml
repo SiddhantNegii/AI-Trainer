@@ -1,0 +1,53 @@
+databases:
+  - name: ai-trainer-db
+    plan: free
+    databaseName: fitness_db
+    user: fitness_user
+
+services:
+  - type: web
+    name: ai-trainer-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ai-trainer-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: LOG_LEVEL
+        value: INFO
+      # The following must be set manually in the Render dashboard.
+      # We don't manage them here because Render's `fromService.host` returns
+      # the full URL (https://...) instead of a bare hostname, which breaks
+      # the code's https:// prepending logic.
+      # - key: FRONTEND_HOST            (e.g. ai-trainer-frontend.onrender.com)
+      # - key: EXERCISEDB_API_HOST      (e.g. exercisedb-api1.p.rapidapi.com)
+      # - key: EXERCISEDB_API_KEY       (your RapidAPI key)
+      # - key: SPOONACULAR_API_KEY      (your Spoonacular key)
+      # Clerk (required for /api/profile, /api/sessions, /api/me):
+      # - key: CLERK_ISSUER             (e.g. https://your-app.clerk.accounts.dev)
+      # - key: CLERK_SECRET_KEY         (sk_test_... from Clerk dashboard)
+      # - key: CLERK_JWKS_URL           (optional override; derived from CLERK_ISSUER)
+
+  - type: web
+    name: ai-trainer-frontend
+    runtime: node
+    plan: free
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # Set manually in the Render dashboard. See note above.
+      # - key: NEXT_PUBLIC_API_HOST           (e.g. ai-trainer-backend-zglc.onrender.com)
+      # - key: NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY  (pk_test_... from Clerk)
+      # - key: CLERK_SECRET_KEY                   (sk_test_... — needed for middleware)

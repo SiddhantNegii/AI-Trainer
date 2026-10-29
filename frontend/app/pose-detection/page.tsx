@@ -1,596 +1,679 @@
-"use client";
+'use client'
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from 'react'
+import TopNav from '../../components/TopNav'
+import Footer from '../../components/Footer'
+import BottomCTA from '../../components/BottomCTA'
+import { useAuthFetch } from '../../utils/authFetch'
+import { FeedbackSmoother } from '../../utils/feedbackSmoother'
+import { useSpeech } from '../../utils/speech'
+import {
+  ExerciseAnalyzer,
+  POSE_CONNECTIONS,
+  type ExerciseKey,
+  type AnalysisResult,
+  type Point,
+} from '../../utils/exerciseAnalyzer'
 
-interface Exercise {
-  name: string;
-  supported: boolean;
-  description: string;
-  key_points?: string[];
+const BRIEFINGS: Record<ExerciseKey, string> = {
+  squat: 'Squat session. Feet shoulder-width apart. Lower with control.',
+  pushup: 'Push-up session. Brace your core. Keep your back flat.',
+  plank: 'Plank session. Body in a straight line. Breathe steady.',
+  lunge: 'Lunge session. Long stance. Lower the back knee with control.',
+  bicep_curl: 'Bicep curl. Elbows pinned. Curl with the biceps, not the back.',
+  shoulder_press: 'Shoulder press. Brace your core. Press straight overhead.',
 }
 
-interface PoseStats {
-  system_status: string;
-  opencv_installed: boolean;
-  mediapipe_installed: boolean;
-  opencv_version: string;
-  mediapipe_version: string;
-  supported_exercises: string[];
-  features: {
-    rep_counting: boolean;
-    form_scoring: boolean;
-    real_time_feedback: boolean;
-    angle_calculation: boolean;
-    body_alignment_check: boolean;
-  };
-  installation_command: string;
-  demo_script: string;
+// Spoken versions of the on-screen all-caps cues (lowercase reads more natural via TTS).
+const FEEDBACK_SPOKEN: Record<string, string> = {
+  'GO DEEPER': 'Go deeper.',
+  'KEEP BACK STRAIGHT': 'Keep your back straight.',
+  'KNEES TOO FORWARD': 'Knees too forward.',
+  'GO LOWER': 'Go lower.',
+  'HIPS TOO LOW': 'Hips too low.',
+  'HIPS TOO HIGH': 'Hips too high.',
+  'NO POSE DETECTED': 'Step into the frame.',
+  'DROP DEEPER': 'Drop deeper.',
+  'KEEP TORSO UPRIGHT': 'Keep your torso upright.',
+  'FRONT KNEE PAST TOE': 'Knee is past your toe.',
+  'CURL HIGHER': 'Curl higher.',
+  'KEEP ELBOW STILL': 'Keep your elbow still.',
+  'PRESS HIGHER': 'Press higher.',
+  'STACK WRIST OVER ELBOW': 'Stack your wrist over your elbow.',
 }
 
-interface AnalysisResult {
-  exercise: string;
-  rep_count: number;
-  form_score: number;
-  feedback: string[];
-  status: string;
+const EXERCISES: Record<ExerciseKey, { label: string; targetMuscles: string; steps: string[] }> = {
+  squat: {
+    label: 'SQUAT',
+    targetMuscles: 'QUADS · GLUTES · HAMSTRINGS',
+    steps: [
+      'STAND WITH FEET SHOULDER-WIDTH APART',
+      'LOWER HIPS BACK AND DOWN',
+      'KEEP CHEST UP, BACK STRAIGHT',
+      'DESCEND UNTIL THIGHS PARALLEL TO FLOOR',
+      'DRIVE THROUGH HEELS TO STAND',
+    ],
+  },
+  pushup: {
+    label: 'PUSH-UP',
+    targetMuscles: 'CHEST · TRICEPS · SHOULDERS',
+    steps: [
+      'PLANK POSITION, HANDS UNDER SHOULDERS',
+      'BRACE CORE, BACK FLAT',
+      'LOWER UNTIL CHEST NEARS FLOOR',
+      'KEEP ELBOWS AT 45° FROM TORSO',
+      'PRESS UP TO STARTING POSITION',
+    ],
+  },
+  plank: {
+    label: 'PLANK',
+    targetMuscles: 'CORE · SHOULDERS · GLUTES',
+    steps: [
+      'FOREARMS ON GROUND, ELBOWS UNDER SHOULDERS',
+      'EXTEND LEGS BACK, TOES ON GROUND',
+      'BODY FORMS A STRAIGHT LINE HEAD TO HEELS',
+      'BRACE CORE, BREATHE STEADILY',
+      'HOLD POSITION FOR THE TARGET DURATION',
+    ],
+  },
+  lunge: {
+    label: 'LUNGE',
+    targetMuscles: 'QUADS · GLUTES · HAMSTRINGS',
+    steps: [
+      'STAND TALL, FEET HIP-WIDTH APART',
+      'STEP ONE FOOT FORWARD INTO LONG STANCE',
+      'LOWER BACK KNEE TOWARD THE FLOOR',
+      'FRONT THIGH PARALLEL, KNEE OVER ANKLE',
+      'PUSH THROUGH FRONT HEEL TO STAND',
+    ],
+  },
+  bicep_curl: {
+    label: 'BICEP CURL',
+    targetMuscles: 'BICEPS · FOREARMS',
+    steps: [
+      'STAND TALL, ARMS AT YOUR SIDES',
+      'PALMS FORWARD, ELBOWS PINNED TO RIBS',
+      'CURL WEIGHT UP TOWARD SHOULDER',
+      'SQUEEZE BICEP AT THE TOP',
+      'LOWER UNDER CONTROL TO FULL EXTENSION',
+    ],
+  },
+  shoulder_press: {
+    label: 'SHOULDER PRESS',
+    targetMuscles: 'DELTOIDS · TRICEPS',
+    steps: [
+      'STAND TALL, FEET SHOULDER-WIDTH APART',
+      'WRISTS AT SHOULDER LEVEL, ELBOWS BENT',
+      'BRACE CORE, AVOID ARCHING LOWER BACK',
+      'PRESS STRAIGHT UP UNTIL ARMS LOCK OUT',
+      'LOWER UNDER CONTROL BACK TO SHOULDERS',
+    ],
+  },
 }
+
+type ConnectionState = 'idle' | 'loading' | 'live' | 'error'
 
 export default function PoseDetectionPage() {
-  const [exercises, setExercises] = useState<Exercise[]>([]);
-  const [stats, setStats] = useState<PoseStats | null>(null);
-  const [selectedExercise, setSelectedExercise] = useState<string>("squat");
-  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [showDemo, setShowDemo] = useState(false);
-  const [cameraActive, setCameraActive] = useState(false);
-  const [repCount, setRepCount] = useState(0);
-  const [formScore, setFormScore] = useState(0);
-  const [currentFeedback, setCurrentFeedback] = useState<string[]>([]);
-  const [processingActive, setProcessingActive] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const intervalRef = useRef<number | null>(null);
+  const [selectedExercise, setSelectedExercise] = useState<ExerciseKey>('squat')
+  const [cameraActive, setCameraActive] = useState(false)
+  const [connectionState, setConnectionState] = useState<ConnectionState>('idle')
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [analysis, setAnalysis] = useState<AnalysisResult>({
+    feedback: [],
+    score: 0,
+    reps: 0,
+    stage: null,
+  })
+
+  const authFetch = useAuthFetch()
+
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const analyzerRef = useRef<ExerciseAnalyzer>(new ExerciseAnalyzer())
+  const smootherRef = useRef<FeedbackSmoother>(new FeedbackSmoother(30, 0.5))
+  const landmarkerRef = useRef<unknown | null>(null)
+  const rafRef = useRef<number | null>(null)
+  const lastVideoTimeRef = useRef<number>(-1)
+  const streamRef = useRef<MediaStream | null>(null)
+  const demoBlobUrlRef = useRef<string | null>(null)
+  const sessionStartRef = useRef<number | null>(null)
+  const formScoreSumRef = useRef<number>(0)
+  const formScoreSamplesRef = useRef<number>(0)
+  const [savedToast, setSavedToast] = useState<string | null>(null)
+  const [isDemo, setIsDemo] = useState(false)
+
+  const speech = useSpeech(true)
 
   useEffect(() => {
-    fetchExercises();
-    fetchStats();
-  }, []);
+    analyzerRef.current.setExercise(selectedExercise)
+  }, [selectedExercise])
 
-  const fetchExercises = async () => {
-    try {
-      const apiUrl = (() => {
-        const hostport = process.env.NEXT_PUBLIC_API_HOSTPORT
-        if (hostport) return `https://${hostport}`
-        const host = process.env.NEXT_PUBLIC_API_HOST
-        if (host) return `https://${host}`
-        return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
-      })()
-      const response = await fetch(`${apiUrl}/api/pose/exercises`);
-      const data = await response.json();
-      setExercises(data.exercises || []);
-    } catch (error) {
-      console.error("Error fetching exercises:", error);
+  useEffect(() => {
+    // Cleanup on unmount.
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop())
+        streamRef.current = null
+      }
+      if (demoBlobUrlRef.current) {
+        URL.revokeObjectURL(demoBlobUrlRef.current)
+        demoBlobUrlRef.current = null
+      }
     }
-  };
+  }, [])
 
-  const fetchStats = async () => {
-    try {
-      const apiUrl = (() => {
-        const hostport = process.env.NEXT_PUBLIC_API_HOSTPORT
-        if (hostport) return `https://${hostport}`
-        const host = process.env.NEXT_PUBLIC_API_HOST
-        if (host) return `https://${host}`
-        return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
-      })()
-      const response = await fetch(`${apiUrl}/api/pose/stats`);
-      const data = await response.json();
-      setStats(data);
-    } catch (error) {
-      console.error("Error fetching stats:", error);
-    }
-  };
-
-  const analyzeExercise = async () => {
-    setLoading(true);
-    try {
-      const apiUrl = (() => {
-        const hostport = process.env.NEXT_PUBLIC_API_HOSTPORT
-        if (hostport) return `https://${hostport}`
-        const host = process.env.NEXT_PUBLIC_API_HOST
-        if (host) return `https://${host}`
-        return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
-      })()
-      const response = await fetch(`${apiUrl}/api/pose/analyze`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          exercise_type: selectedExercise,
-        }),
-      });
-      const data = await response.json();
-      setAnalysis(data);
-    } catch (error) {
-      console.error("Error analyzing pose:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    if (status === "ready") return "text-green-400";
-    return "text-yellow-400";
-  };
-
-  const getFormScoreColor = (score: number) => {
-    if (score >= 80) return "text-green-400";
-    if (score >= 60) return "text-yellow-400";
-    return "text-red-400";
-  };
+  const initLandmarker = async () => {
+    if (landmarkerRef.current) return landmarkerRef.current
+    const { FilesetResolver, PoseLandmarker } = await import('@mediapipe/tasks-vision')
+    const vision = await FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.10/wasm',
+    )
+    const landmarker = await PoseLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath:
+          'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+        delegate: 'GPU',
+      },
+      runningMode: 'VIDEO',
+      numPoses: 1,
+    })
+    landmarkerRef.current = landmarker
+    return landmarker
+  }
 
   const startCamera = async () => {
+    setErrorMsg(null)
+    setConnectionState('loading')
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { width: 640, height: 480 } 
-      });
-      
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        setCameraActive(true);
-        setRepCount(0);
-        setFormScore(0);
-        
-        // Connect to WebSocket
-        const apiUrl = (() => {
-          const hostport = process.env.NEXT_PUBLIC_API_HOSTPORT
-          if (hostport) return `https://${hostport}`
-          const host = process.env.NEXT_PUBLIC_API_HOST
-          if (host) return `https://${host}`
-          return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
-        })()
-        const wsUrl = apiUrl.replace(/^http/, 'ws') + '/ws/pose';
-        const ws = new WebSocket(wsUrl);
-        wsRef.current = ws;
-        
-        ws.onopen = () => {
-          console.log("WebSocket connected");
-          setProcessingActive(true);
-          startFrameCapture();
-        };
-        
-        ws.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-          
-          if (data.type === "analysis") {
-            setRepCount(data.rep_count || 0);
-            setFormScore(data.form_score || 0);
-            setCurrentFeedback(data.feedback || []);
-            
-            // Don't display processed frame - keep smooth video
-          } else if (data.error) {
-            console.error("WebSocket error:", data.error);
-            alert(data.error);
-          }
-        };
-        
-        ws.onerror = (error) => {
-          console.error("WebSocket error:", error);
-          setProcessingActive(false);
-        };
-        
-        ws.onclose = () => {
-          console.log("WebSocket closed");
-          setProcessingActive(false);
-        };
+      const landmarker = (await initLandmarker()) as {
+        detectForVideo: (
+          video: HTMLVideoElement,
+          ts: number,
+        ) => { landmarks: Point[][] }
       }
-    } catch (error) {
-      console.error("Error accessing camera:", error);
-      alert("Unable to access camera. Please grant camera permissions.");
-    }
-  };
 
-  const startFrameCapture = () => {
-    if (intervalRef.current) return;
-    
-    // Create a temporary canvas for capturing frames
-    const tempCanvas = document.createElement('canvas');
-    const tempCtx = tempCanvas.getContext('2d');
-    
-    intervalRef.current = window.setInterval(() => {
-      if (videoRef.current && wsRef.current?.readyState === WebSocket.OPEN && tempCtx) {
-        const video = videoRef.current;
-        
-        if (video.readyState === video.HAVE_ENOUGH_DATA) {
-          // Set canvas size to match video
-          tempCanvas.width = video.videoWidth;
-          tempCanvas.height = video.videoHeight;
-          
-          // Draw current frame
-          tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-          
-          // Convert to base64
-          const imageData = tempCanvas.toDataURL('image/jpeg', 0.5);
-          
-          // Send to WebSocket
-          wsRef.current.send(JSON.stringify({
-            type: "frame",
-            image: imageData,
-            exercise: selectedExercise
-          }));
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480 },
+        audio: false,
+      })
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        await videoRef.current.play()
+      }
+      analyzerRef.current.reset()
+      smootherRef.current.reset()
+      speech.reset()
+      setAnalysis({ feedback: [], score: 0, reps: 0, stage: null })
+      setCameraActive(true)
+      setConnectionState('live')
+      sessionStartRef.current = Date.now()
+      formScoreSumRef.current = 0
+      formScoreSamplesRef.current = 0
+      speech.speak(BRIEFINGS[selectedExercise], { force: true })
+      loop(landmarker)
+    } catch (err) {
+      console.error('Camera/landmarker error:', err)
+      setErrorMsg('Could not start camera. Grant permission and reload.')
+      setConnectionState('error')
+    }
+  }
+
+  const triggerDemoPicker = () => {
+    fileInputRef.current?.click()
+  }
+
+  const startDemoVideo = async (file: File) => {
+    setErrorMsg(null)
+    setConnectionState('loading')
+    try {
+      const landmarker = (await initLandmarker()) as {
+        detectForVideo: (video: HTMLVideoElement, ts: number) => { landmarks: Point[][] }
+      }
+
+      // If a camera stream is running, stop it first.
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop())
+        streamRef.current = null
+      }
+      if (demoBlobUrlRef.current) {
+        URL.revokeObjectURL(demoBlobUrlRef.current)
+        demoBlobUrlRef.current = null
+      }
+
+      const blobUrl = URL.createObjectURL(file)
+      demoBlobUrlRef.current = blobUrl
+
+      const video = videoRef.current
+      if (!video) throw new Error('Video element not available')
+      video.srcObject = null
+      video.src = blobUrl
+      video.muted = true
+      video.loop = true
+      await video.play()
+
+      analyzerRef.current.reset()
+      smootherRef.current.reset()
+      speech.reset()
+      setAnalysis({ feedback: [], score: 0, reps: 0, stage: null })
+      setCameraActive(true)
+      setIsDemo(true)
+      setConnectionState('live')
+      sessionStartRef.current = Date.now()
+      formScoreSumRef.current = 0
+      formScoreSamplesRef.current = 0
+      speech.speak(BRIEFINGS[selectedExercise], { force: true })
+      loop(landmarker)
+    } catch (err) {
+      console.error('Demo video error:', err)
+      setErrorMsg('Could not play that video. Try MP4, WebM, or MOV.')
+      setConnectionState('error')
+    }
+  }
+
+  const onDemoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) startDemoVideo(file)
+    e.target.value = '' // allow choosing the same file again next time
+  }
+
+  const loop = (landmarker: {
+    detectForVideo: (video: HTMLVideoElement, ts: number) => { landmarks: Point[][] }
+  }) => {
+    const tick = () => {
+      const video = videoRef.current
+      const canvas = canvasRef.current
+      if (!video || !canvas || video.readyState < 2) {
+        rafRef.current = requestAnimationFrame(tick)
+        return
+      }
+      const ts = performance.now()
+      if (video.currentTime !== lastVideoTimeRef.current) {
+        lastVideoTimeRef.current = video.currentTime
+        try {
+          const result = landmarker.detectForVideo(video, ts)
+          const landmarks = result.landmarks?.[0] ?? null
+          if (landmarks) {
+            const raw = analyzerRef.current.analyze(landmarks)
+            const stable = smootherRef.current.push(raw.feedback)
+            const smoothed: AnalysisResult = { ...raw, feedback: stable }
+            setAnalysis(smoothed)
+            if (raw.score > 0) {
+              formScoreSumRef.current += raw.score
+              formScoreSamplesRef.current += 1
+            }
+            // Voice: only consider the most-stable message (smoother sorts by frequency).
+            const primary = stable[0] ?? null
+            speech.considerFeedback(primary ? FEEDBACK_SPOKEN[primary] ?? primary : null)
+            speech.considerRepMilestone(raw.reps)
+            drawSkeleton(canvas, video, landmarks)
+          } else {
+            smootherRef.current.push([])
+            speech.considerFeedback(null)
+            drawSkeleton(canvas, video, null)
+          }
+        } catch (err) {
+          console.error('detectForVideo error:', err)
         }
       }
-    }, 300); // Send frame every 300ms (3 FPS) for analysis only
-  };
+      rafRef.current = requestAnimationFrame(tick)
+    }
+    rafRef.current = requestAnimationFrame(tick)
+  }
 
-  const stopCamera = () => {
-    // Save workout data before stopping
-    if (repCount > 0) {
-      saveWorkoutSession();
-    }
-    
-    // Stop frame capture
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-    
-    // Close WebSocket
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    
-    // Stop camera stream
-    if (videoRef.current?.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
-      videoRef.current.srcObject = null;
-    }
-    
-    setCameraActive(false);
-    setProcessingActive(false);
-    setRepCount(0);
-    setFormScore(0);
-    setCurrentFeedback([]);
-  };
+  const drawSkeleton = (
+    canvas: HTMLCanvasElement,
+    video: HTMLVideoElement,
+    landmarks: Point[] | null,
+  ) => {
+    const w = video.videoWidth || 640
+    const h = video.videoHeight || 480
+    if (canvas.width !== w) canvas.width = w
+    if (canvas.height !== h) canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, w, h)
+    if (!landmarks) return
 
-  const saveWorkoutSession = async () => {
+    ctx.strokeStyle = '#cbf22b'
+    ctx.lineWidth = 3
+    ctx.fillStyle = '#cbf22b'
+
+    POSE_CONNECTIONS.forEach(([a, b]) => {
+      const pa = landmarks[a]
+      const pb = landmarks[b]
+      if (!pa || !pb) return
+      ctx.beginPath()
+      ctx.moveTo(pa.x * w, pa.y * h)
+      ctx.lineTo(pb.x * w, pb.y * h)
+      ctx.stroke()
+    })
+
+    landmarks.forEach((lm, i) => {
+      // only draw upper-body + leg landmarks for clarity (skip face details)
+      if (i < 11) return
+      ctx.beginPath()
+      ctx.arc(lm.x * w, lm.y * h, 4, 0, Math.PI * 2)
+      ctx.fill()
+    })
+  }
+
+  const stopCamera = async () => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop())
+      streamRef.current = null
+    }
+    if (videoRef.current) {
+      videoRef.current.pause()
+      videoRef.current.srcObject = null
+      videoRef.current.removeAttribute('src')
+      videoRef.current.load()
+    }
+    if (demoBlobUrlRef.current) {
+      URL.revokeObjectURL(demoBlobUrlRef.current)
+      demoBlobUrlRef.current = null
+    }
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext('2d')
+      if (ctx) ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
+    }
+
+    const wasDemo = isDemo
+    setCameraActive(false)
+    setIsDemo(false)
+    setConnectionState('idle')
+    speech.reset()
+    smootherRef.current.reset()
+
+    // Demo sessions don't get logged — would skew real progress data.
+    if (wasDemo) return
+
+    const reps = analyzerRef.current.getRepCount()
+    const avgScore =
+      formScoreSamplesRef.current > 0
+        ? Math.round(formScoreSumRef.current / formScoreSamplesRef.current)
+        : 0
+    const duration = sessionStartRef.current
+      ? Math.round((Date.now() - sessionStartRef.current) / 1000)
+      : 0
+
+    const shouldLog =
+      duration >= 5 && (reps > 0 || (selectedExercise === 'plank' && duration >= 10))
+    if (!shouldLog) return
+
     try {
-      // Calculate duration (rough estimate based on reps)
-      const estimatedDuration = Math.max(5, repCount * 2); // 2 mins per rep average
-      
-      // Calculate calories based on exercise type and reps
-      const caloriesPerRep = selectedExercise === 'squat' ? 8 : 
-                            selectedExercise === 'pushup' ? 6 : 5;
-      const calories = repCount * caloriesPerRep;
-      
-      const workoutData = {
-        date: new Date().toISOString().split('T')[0],
-        exercise_type: selectedExercise,
-        duration_minutes: estimatedDuration,
-        calories_burned: calories,
-        intensity: Math.round(formScore / 10), // Convert 0-100 to 1-10
-        reps: repCount,
-        sets: Math.ceil(repCount / 10) // Assume 10 reps per set
-      };
-
-      const apiUrl = (() => {
-        const hostport = process.env.NEXT_PUBLIC_API_HOSTPORT
-        if (hostport) return `https://${hostport}`
-        const host = process.env.NEXT_PUBLIC_API_HOST
-        if (host) return `https://${host}`
-        return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
-      })()
-      const response = await fetch(`${apiUrl}/api/analytics/log-workout`, {
+      const res = await authFetch('/api/sessions', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(workoutData),
-      });
-
-      if (response.ok) {
-        console.log('✅ Workout saved successfully!');
+        body: JSON.stringify({
+          exercise: selectedExercise,
+          reps,
+          form_score: avgScore,
+          duration_seconds: duration,
+        }),
+      })
+      if (res.ok) {
+        setSavedToast('SESSION SAVED →')
+        setTimeout(() => setSavedToast(null), 2500)
       }
-    } catch (error) {
-      console.error('Error saving workout:', error);
+    } catch (err) {
+      console.error('Save session error:', err)
     }
-  };
+  }
 
   const resetCounter = () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "reset" }));
-    }
-    setRepCount(0);
-    setFormScore(0);
-  };
+    analyzerRef.current.reset()
+    setAnalysis({ feedback: [], score: 0, reps: 0, stage: null })
+  }
 
-  const changeExercise = (exercise: string) => {
-    setSelectedExercise(exercise);
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ 
-        type: "change_exercise", 
-        exercise: exercise 
-      }));
-    }
-  };
+  const changeExercise = (ex: ExerciseKey) => {
+    setSelectedExercise(ex)
+  }
+
+  const exerciseInfo = EXERCISES[selectedExercise]
+
+  const statusPill = (() => {
+    if (errorMsg) return { label: '● ERROR', color: 'text-signal' }
+    if (connectionState === 'loading')
+      return { label: '● LOADING MODEL', color: 'text-on-surface-variant' }
+    if (!cameraActive) return { label: '○ CAMERA OFF', color: 'text-on-surface-variant' }
+    if (isDemo) return { label: '● DEMO MODE', color: 'text-primary-fixed' }
+    return { label: '● LIVE', color: 'text-primary-fixed' }
+  })()
+
+  const formScore = analysis.score
+  const repCount = analysis.reps
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 text-white p-8">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-5xl font-bold mb-4 bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-            AI Pose Detection
-          </h1>
-          <p className="text-gray-300 text-lg">
-            Real-time exercise form analysis with automatic rep counting
-          </p>
-        </div>
+    <div className="bg-background text-on-background min-h-screen">
+      <TopNav />
 
-        {/* System Status */}
-        {stats && (
-          <div className="mb-8 bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-purple-500/30">
-            <h2 className="text-2xl font-bold mb-4 flex items-center gap-3">
-              <span>🔧</span> System Status
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <p className="text-gray-400">Status</p>
-                <p className={`text-xl font-bold ${getStatusColor(stats.system_status)}`}>
-                  {stats.system_status === "ready" ? "✅ Ready" : "🟡 Demo Mode"}
-                </p>
-              </div>
-              <div>
-                <p className="text-gray-400">MediaPipe</p>
-                <p className={`text-xl font-bold ${stats.mediapipe_installed ? "text-green-400" : "text-red-400"}`}>
-                  {stats.mediapipe_installed ? `✅ ${stats.mediapipe_version}` : "❌ Not Installed"}
-                </p>
-              </div>
-              <div>
-                <p className="text-gray-400">OpenCV</p>
-                <p className={`text-xl font-bold ${stats.opencv_installed ? "text-green-400" : "text-red-400"}`}>
-                  {stats.opencv_installed ? `✅ ${stats.opencv_version}` : "❌ Not Installed"}
-                </p>
-              </div>
-              <div>
-                <p className="text-gray-400">Supported Exercises</p>
-                <p className="text-xl font-bold text-purple-400">
-                  {stats.supported_exercises?.length || 0}
-                </p>
-              </div>
-            </div>
-
-            {/* Features */}
-            <div className="mt-6">
-              <h3 className="text-lg font-semibold mb-3 text-purple-400">Features</h3>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                {stats.features && Object.entries(stats.features).map(([feature, enabled]) => (
-                  <div key={feature} className="flex items-center gap-2">
-                    <span>{enabled ? "✅" : "❌"}</span>
-                    <span className="text-sm text-gray-300">
-                      {feature.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+      <main className="pt-24 pb-0">
+        {/* HEADER */}
+        <section className="px-margin-mobile lg:px-margin-desktop py-12 bg-surface border-b border-outline-variant/20 flex flex-col md:flex-row md:justify-between md:items-end gap-6">
+          <div>
+            <h1 className="font-display-xl text-[48px] md:text-[64px] leading-none text-primary uppercase">
+              POSE DETECTION
+            </h1>
+            <p className="font-body-lg text-body-lg text-secondary mt-3">
+              Real-time form scoring powered by MediaPipe — running on-device.
+            </p>
           </div>
-        )}
+          <span className={`font-label-caps text-label-caps ${statusPill.color}`}>
+            {savedToast ?? statusPill.label}
+          </span>
+        </section>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Supported Exercises */}
-          <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-purple-500/30">
-            <h2 className="text-2xl font-bold mb-6 flex items-center gap-3">
-              <span>💪</span> Supported Exercises
-            </h2>
-            <div className="space-y-4">
-              {exercises.map((exercise) => (
-                <div
-                  key={exercise.name}
-                  className={`p-4 rounded-lg border transition-all cursor-pointer ${
-                    selectedExercise === exercise.name
-                      ? "bg-purple-900/30 border-purple-500"
-                      : "bg-gray-700/30 border-gray-600 hover:border-purple-500/50"
-                  } ${!exercise.supported && "opacity-50"}`}
-                  onClick={() => {
-                    if (exercise.supported) {
-                      changeExercise(exercise.name);
-                    }
-                  }}
-                >
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="text-xl font-semibold capitalize">{exercise.name}</h3>
-                    {exercise.supported ? (
-                      <span className="text-green-400 text-sm">✅ Ready</span>
-                    ) : (
-                      <span className="text-yellow-400 text-sm">🚧 Coming Soon</span>
-                    )}
-                  </div>
-                  <p className="text-gray-300 text-sm mb-3">{exercise.description}</p>
-                  {exercise.key_points && exercise.key_points.length > 0 && (
-                    <div className="space-y-1">
-                      {exercise.key_points.map((point, idx) => (
-                        <p key={idx} className="text-xs text-gray-400 flex items-start gap-2">
-                          <span className="text-purple-400">•</span>
-                          {point}
-                        </p>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
+        {/* MAIN STAGE */}
+        <section className="relative w-full bg-black overflow-hidden">
+          <div className="relative aspect-video max-h-[78vh] w-full">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover bg-black"
+            />
+            <canvas
+              ref={canvasRef}
+              className="absolute inset-0 w-full h-full pointer-events-none"
+            />
 
-          {/* Analysis Panel */}
-          <div className="space-y-6">
-            {/* Quick Analysis */}
-            <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-purple-500/30">
-              <h2 className="text-2xl font-bold mb-6 flex items-center gap-3">
-                <span>🎯</span> Quick Analysis
-              </h2>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium mb-2">Selected Exercise</label>
-                  <p className="text-xl font-bold text-purple-400 capitalize">{selectedExercise}</p>
-                </div>
+            {!cameraActive && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-margin-mobile bg-black/40 backdrop-blur-sm">
+                <span className="font-label-caps text-label-caps text-on-surface-variant mb-4">
+                  CAMERA INACTIVE
+                </span>
+                <p className="font-display-xl text-[40px] md:text-[64px] leading-none text-primary mb-8 uppercase">
+                  STAND BACK<br />FULL BODY IN FRAME
+                </p>
                 <button
-                  onClick={analyzeExercise}
-                  disabled={loading}
-                  className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold py-3 px-6 rounded-lg transition-all"
+                  onClick={startCamera}
+                  disabled={connectionState === 'loading'}
+                  className="bg-primary-fixed text-on-primary-fixed font-headline-md text-headline-md tracking-widest px-12 py-6 hover:bg-white hover:text-black transition-colors active:scale-95 disabled:opacity-60"
                 >
-                  {loading ? "Analyzing..." : "Get Form Guidance"}
+                  {connectionState === 'loading' ? 'LOADING MODEL…' : 'START SESSION'}
                 </button>
-              </div>
 
-              {analysis && (
-                <div className="mt-6 space-y-4">
-                  <div className="flex justify-between items-center p-4 bg-gray-700/30 rounded-lg">
-                    <span className="text-gray-400">Form Score</span>
-                    <span className={`text-2xl font-bold ${getFormScoreColor(analysis.form_score)}`}>
-                      {analysis.form_score}%
-                    </span>
-                  </div>
-                  <div className="p-4 bg-gray-700/30 rounded-lg">
-                    <h3 className="font-semibold mb-3 text-purple-400">Form Tips</h3>
-                    <ul className="space-y-2">
-                      {analysis.feedback.map((tip, idx) => (
-                        <li key={idx} className="text-sm text-gray-300 flex items-start gap-2">
-                          <span className="text-purple-400">→</span>
-                          {tip}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  {analysis.status === "demo_mode" && (
-                    <div className="p-4 bg-yellow-900/20 border border-yellow-500/30 rounded-lg">
-                      <p className="text-sm text-yellow-300">
-                        ℹ️ This is demo mode. For live pose detection, use the webcam demo below.
-                      </p>
-                    </div>
-                  )}
-                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="video/*"
+                  onChange={onDemoFileChange}
+                  className="hidden"
+                />
+                <button
+                  onClick={triggerDemoPicker}
+                  disabled={connectionState === 'loading'}
+                  className="mt-6 font-label-caps text-label-caps text-secondary border-b border-outline-variant/40 pb-1 hover:text-primary-fixed hover:border-primary-fixed transition-colors disabled:opacity-60"
+                >
+                  LOAD A DEMO VIDEO →
+                </button>
+                <span className="mt-2 font-label-caps text-[10px] text-on-surface-variant tracking-wider">
+                  FOR TESTING / PRESENTATION — NOT SAVED TO HISTORY
+                </span>
+
+                {errorMsg && (
+                  <p className="mt-6 font-label-caps text-label-caps text-signal max-w-md">
+                    {errorMsg}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* TOP-LEFT FORM SCORE */}
+            <div className="absolute top-0 left-0 p-6 md:p-8 flex flex-col items-start z-10 pointer-events-none">
+              <span className="font-label-caps text-label-caps text-on-surface-variant">
+                FORM
+              </span>
+              <div className="flex items-baseline gap-2">
+                <span
+                  className={`font-data-point text-[64px] md:text-[96px] leading-none ${
+                    formScore >= 85
+                      ? 'text-primary-fixed'
+                      : formScore >= 60
+                      ? 'text-primary'
+                      : 'text-signal'
+                  }`}
+                  style={{ textShadow: '0 2px 16px rgba(0,0,0,0.6)' }}
+                >
+                  {formScore}
+                </span>
+                <span className="font-headline-md text-[20px] md:text-[32px] text-on-surface-variant">
+                  /100
+                </span>
+              </div>
+              <div className="mt-3 w-1 h-24 md:h-32 bg-white/20 relative">
+                <div
+                  className="absolute bottom-0 left-0 right-0 bg-primary-fixed transition-all duration-150"
+                  style={{ height: `${formScore}%` }}
+                />
+              </div>
+            </div>
+
+            {/* TOP-RIGHT REPS */}
+            <div className="absolute top-0 right-0 p-6 md:p-8 flex flex-col items-end z-10 text-right pointer-events-none">
+              <span className="font-label-caps text-label-caps text-on-surface-variant">
+                REPS
+              </span>
+              <span
+                className="font-data-point text-[80px] md:text-[144px] leading-none text-primary-fixed"
+                style={{ textShadow: '0 2px 16px rgba(0,0,0,0.6)' }}
+              >
+                {repCount}
+              </span>
+            </div>
+
+            {/* FEEDBACK TOAST */}
+            {cameraActive && analysis.feedback.length > 0 && (
+              <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 bg-black/90 border-l-4 border-primary-fixed px-6 py-3 max-w-md pointer-events-none">
+                <span className="font-label-caps text-label-caps text-white">
+                  {analysis.feedback[0]}
+                </span>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* TAB BAR + CONTROLS */}
+        <section className="bg-surface-container border-b border-outline-variant/20 py-6">
+          <div className="px-margin-mobile lg:px-margin-desktop flex flex-col md:flex-row items-stretch md:items-center justify-between gap-6">
+            <div className="flex justify-center md:justify-start gap-8 md:gap-16">
+              {(Object.keys(EXERCISES) as ExerciseKey[]).map((key) => {
+                const isActive = selectedExercise === key
+                return (
+                  <button
+                    key={key}
+                    onClick={() => changeExercise(key)}
+                    className={`font-headline-md text-[20px] md:text-headline-md transition-colors pb-2 ${
+                      isActive
+                        ? 'text-primary-fixed border-b-4 border-primary-fixed'
+                        : 'text-secondary hover:text-primary-fixed'
+                    }`}
+                  >
+                    {EXERCISES[key].label}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="flex gap-3 justify-end items-center">
+              {speech.isSupported && (
+                <button
+                  onClick={() => speech.setEnabled((v) => !v)}
+                  className={`font-label-caps text-label-caps border px-6 py-3 transition-colors ${
+                    speech.enabled
+                      ? 'text-primary-fixed border-primary-fixed'
+                      : 'text-secondary border-outline-variant hover:text-primary-fixed hover:border-primary-fixed'
+                  }`}
+                  title={speech.enabled ? 'Mute voice cues' : 'Enable voice cues'}
+                >
+                  <span className="material-symbols-outlined align-middle text-base mr-1">
+                    {speech.enabled ? 'volume_up' : 'volume_off'}
+                  </span>
+                  {speech.enabled ? 'VOICE ON' : 'VOICE OFF'}
+                </button>
+              )}
+              {cameraActive && (
+                <>
+                  <button
+                    onClick={resetCounter}
+                    className="font-label-caps text-label-caps text-secondary border border-outline-variant px-6 py-3 hover:text-primary-fixed hover:border-primary-fixed transition-colors"
+                  >
+                    RESET REPS
+                  </button>
+                  <button
+                    onClick={stopCamera}
+                    className="font-label-caps text-label-caps text-signal px-6 py-3 hover:text-white transition-colors"
+                  >
+                    END SESSION →
+                  </button>
+                </>
               )}
             </div>
-
-            {/* Live Demo Section */}
-            <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-purple-500/30">
-              <h2 className="text-2xl font-bold mb-4 flex items-center gap-3">
-                <span>📹</span> Live Webcam Feed
-              </h2>
-              
-              {/* Video Container */}
-              <div className="relative bg-black rounded-lg overflow-hidden mb-4" style={{ aspectRatio: '4/3' }}>
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover"
-                />
-                
-                {!cameraActive && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
-                    <div className="text-center">
-                      <div className="text-6xl mb-4">📹</div>
-                      <p className="text-gray-300 mb-4">Camera not active</p>
-                      <button
-                        onClick={startCamera}
-                        className="bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-all"
-                      >
-                        Start Camera
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Stats Overlay */}
-                {cameraActive && (
-                  <div className="absolute top-4 left-4 right-4 space-y-2">
-                    <div className="bg-black/70 backdrop-blur-sm rounded-lg p-3 inline-block">
-                      <div className="text-sm text-gray-400">Exercise</div>
-                      <div className="text-2xl font-bold text-purple-400 capitalize">{selectedExercise}</div>
-                      {processingActive && (
-                        <div className="text-xs text-green-400 mt-1">🟢 AI Detecting...</div>
-                      )}
-                    </div>
-                    <div className="flex gap-2">
-                      <div className="bg-black/70 backdrop-blur-sm rounded-lg p-3">
-                        <div className="text-sm text-gray-400">Reps</div>
-                        <div className="text-3xl font-bold text-green-400">{repCount}</div>
-                      </div>
-                      <div className="bg-black/70 backdrop-blur-sm rounded-lg p-3">
-                        <div className="text-sm text-gray-400">Form Score</div>
-                        <div className={`text-3xl font-bold ${getFormScoreColor(formScore)}`}>
-                          {formScore}%
-                        </div>
-                      </div>
-                    </div>
-                    {currentFeedback.length > 0 && (
-                      <div className="bg-black/70 backdrop-blur-sm rounded-lg p-3">
-                        <div className="text-sm text-gray-400 mb-1">Feedback</div>
-                        {currentFeedback.slice(0, 2).map((tip, idx) => (
-                          <div key={idx} className="text-xs text-yellow-300">• {tip}</div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Controls */}
-              <div className="space-y-3">
-                {cameraActive ? (
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      onClick={resetCounter}
-                      className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded-lg transition-all"
-                    >
-                      Reset Counter
-                    </button>
-                    <button
-                      onClick={stopCamera}
-                      className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-all"
-                    >
-                      Stop Camera
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={startCamera}
-                    className="w-full bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-all"
-                  >
-                    Start Live Detection
-                  </button>
-                )}
-
-                <div className="p-4 bg-blue-900/20 border border-blue-500/30 rounded-lg">
-                  <h3 className="font-semibold mb-2 text-blue-400">How to use</h3>
-                  <ul className="space-y-1 text-sm text-gray-300">
-                    <li>• Select your exercise from the left panel</li>
-                    <li>• Click "Start Camera" to begin</li>
-                    <li>• Stand 2 meters back so full body is visible</li>
-                    <li>• Perform the exercise and watch reps count automatically</li>
-                    <li>• Form score updates in real-time</li>
-                  </ul>
-                </div>
-
-                <div className="p-4 bg-purple-900/20 border border-purple-500/30 rounded-lg">
-                  <h3 className="font-semibold mb-2 text-purple-400">Live Pose Detection</h3>
-                  <p className="text-sm text-gray-300">
-                    This uses real MediaPipe AI to track your body movements! The skeleton overlay 
-                    shows 33 body landmarks, and the system automatically counts reps when you perform 
-                    exercises correctly.
-                  </p>
-                </div>
-              </div>
-            </div>
           </div>
-        </div>
-      </div>
+        </section>
+
+        {/* HOW TO */}
+        <section className="px-margin-mobile lg:px-margin-desktop py-section-gap grid grid-cols-1 md:grid-cols-5 gap-12">
+          <div className="md:col-span-2">
+            <span className="font-label-caps text-label-caps text-on-surface-variant uppercase">
+              HOW TO
+            </span>
+            <h2 className="font-display-xl text-[56px] md:text-[80px] leading-none text-primary-fixed mt-4">
+              {exerciseInfo.label}
+            </h2>
+            <p className="font-body-md text-body-md text-on-surface-variant mt-4 uppercase tracking-wide">
+              {exerciseInfo.targetMuscles}
+            </p>
+          </div>
+          <div className="md:col-span-3 flex flex-col">
+            {exerciseInfo.steps.map((step, i) => (
+              <div
+                key={i}
+                className="flex items-baseline gap-6 py-5 border-b border-outline-variant/20"
+              >
+                <span className="font-display-xl text-[36px] md:text-[48px] leading-none text-primary-fixed w-12 flex-shrink-0">
+                  {(i + 1).toString().padStart(2, '0')}
+                </span>
+                <span className="font-body-lg text-body-lg text-primary">{step}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <BottomCTA
+          headline="KEEP TRAINING."
+          buttonLabel="VIEW PROGRESS"
+          href="/dashboard"
+        />
+      </main>
+
+      <Footer />
     </div>
-  );
+  )
 }

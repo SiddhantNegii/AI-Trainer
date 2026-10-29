@@ -45,6 +45,22 @@ class ExerciseAnalyzer:
                 'body_angle_min': 165,
                 'body_angle_max': 195,
                 'min_hold_time': 5  # seconds
+            },
+            'lunge': {
+                'knee_angle_down': 95,
+                'knee_angle_up': 160,
+                'back_angle_min': 160,
+                'back_angle_max': 200
+            },
+            'bicep_curl': {
+                'elbow_flexed': 50,
+                'elbow_extended': 160,
+                'elbow_drift_max': 0.08
+            },
+            'shoulder_press': {
+                'elbow_down': 95,
+                'elbow_up': 160,
+                'wrist_stack_max': 0.1
             }
         }
     
@@ -232,6 +248,200 @@ class ExerciseAnalyzer:
             'angles': {'body': body_angle}
         }
     
+    def analyze_lunge(self, landmarks):
+        """
+        Analyze lunge form (front-leg view, mirrors squat state machine)
+
+        Args:
+            landmarks: MediaPipe pose landmarks
+
+        Returns:
+            dict: {
+                'feedback': List of correction messages,
+                'score': Form accuracy score (0-100),
+                'angles': Dict of joint angles,
+                'stage': Current movement stage,
+                'reps': Current rep count
+            }
+        """
+        if not landmarks:
+            return {'feedback': ['No pose detected'], 'score': 0, 'angles': {}, 'stage': None}
+
+        hip = self.pose_detector.get_landmark_coords(landmarks, self.mp_pose.PoseLandmark.LEFT_HIP.value)
+        knee = self.pose_detector.get_landmark_coords(landmarks, self.mp_pose.PoseLandmark.LEFT_KNEE.value)
+        ankle = self.pose_detector.get_landmark_coords(landmarks, self.mp_pose.PoseLandmark.LEFT_ANKLE.value)
+        shoulder = self.pose_detector.get_landmark_coords(landmarks, self.mp_pose.PoseLandmark.LEFT_SHOULDER.value)
+
+        knee_angle = self.pose_detector.calculate_angle(hip, knee, ankle)
+        back_angle = self.pose_detector.calculate_angle(shoulder, hip, knee)
+
+        feedback = []
+        score_components = []
+
+        # Depth check (front leg)
+        if knee_angle < self.thresholds['lunge']['knee_angle_down']:
+            if self.stage != "down":
+                self.stage = "down"
+            score_components.append(100)
+        elif knee_angle < 120:
+            score_components.append(70)
+            feedback.append("Drop deeper")
+        else:
+            if self.stage == "down":
+                self.stage = "up"
+                self.rep_count += 1
+            score_components.append(50)
+
+        # Torso uprightness
+        if self.thresholds['lunge']['back_angle_min'] < back_angle < self.thresholds['lunge']['back_angle_max']:
+            score_components.append(100)
+        else:
+            score_components.append(50)
+            feedback.append("Keep torso upright")
+
+        # Front knee tracking (knee should not drift far past ankle)
+        if (knee[0] - ankle[0]) < 0.1:
+            score_components.append(100)
+        else:
+            score_components.append(60)
+            feedback.append("Front knee past toe")
+
+        final_score = int(np.mean(score_components)) if score_components else 0
+
+        return {
+            'feedback': feedback,
+            'score': final_score,
+            'angles': {'knee': knee_angle, 'back': back_angle},
+            'stage': self.stage,
+            'reps': self.rep_count
+        }
+
+    def analyze_bicep_curl(self, landmarks):
+        """
+        Analyze bicep curl form using a single elbow angle.
+
+        Args:
+            landmarks: MediaPipe pose landmarks
+
+        Returns:
+            dict: {
+                'feedback': List of correction messages,
+                'score': Form accuracy score (0-100),
+                'angles': Dict of joint angles,
+                'stage': Current movement stage,
+                'reps': Current rep count
+            }
+        """
+        if not landmarks:
+            return {'feedback': ['No pose detected'], 'score': 0, 'angles': {}, 'stage': None}
+
+        shoulder = self.pose_detector.get_landmark_coords(landmarks, self.mp_pose.PoseLandmark.LEFT_SHOULDER.value)
+        elbow = self.pose_detector.get_landmark_coords(landmarks, self.mp_pose.PoseLandmark.LEFT_ELBOW.value)
+        wrist = self.pose_detector.get_landmark_coords(landmarks, self.mp_pose.PoseLandmark.LEFT_WRIST.value)
+
+        elbow_angle = self.pose_detector.calculate_angle(shoulder, elbow, wrist)
+
+        feedback = []
+        score_components = []
+
+        # Stage 'down' = curled at top (small elbow angle); 'up' = arm extended.
+        # Counts on the down -> up (curl-and-lower) transition, like squat.
+        if elbow_angle < self.thresholds['bicep_curl']['elbow_flexed']:
+            if self.stage != "down":
+                self.stage = "down"
+            score_components.append(100)
+        elif elbow_angle < 110:
+            score_components.append(70)
+            feedback.append("Curl higher")
+        elif elbow_angle > self.thresholds['bicep_curl']['elbow_extended']:
+            if self.stage == "down":
+                self.stage = "up"
+                self.rep_count += 1
+            score_components.append(100)
+        else:
+            score_components.append(70)
+
+        # Elbow stability — shouldn't drift forward/back from shoulder line.
+        if abs(elbow[0] - shoulder[0]) < self.thresholds['bicep_curl']['elbow_drift_max']:
+            score_components.append(100)
+        else:
+            score_components.append(60)
+            feedback.append("Keep elbow still")
+
+        final_score = int(np.mean(score_components)) if score_components else 0
+
+        return {
+            'feedback': feedback,
+            'score': final_score,
+            'angles': {'elbow': elbow_angle},
+            'stage': self.stage,
+            'reps': self.rep_count
+        }
+
+    def analyze_shoulder_press(self, landmarks):
+        """
+        Analyze overhead shoulder press form.
+
+        Args:
+            landmarks: MediaPipe pose landmarks
+
+        Returns:
+            dict: {
+                'feedback': List of correction messages,
+                'score': Form accuracy score (0-100),
+                'angles': Dict of joint angles,
+                'stage': Current movement stage,
+                'reps': Current rep count
+            }
+        """
+        if not landmarks:
+            return {'feedback': ['No pose detected'], 'score': 0, 'angles': {}, 'stage': None}
+
+        shoulder = self.pose_detector.get_landmark_coords(landmarks, self.mp_pose.PoseLandmark.LEFT_SHOULDER.value)
+        elbow = self.pose_detector.get_landmark_coords(landmarks, self.mp_pose.PoseLandmark.LEFT_ELBOW.value)
+        wrist = self.pose_detector.get_landmark_coords(landmarks, self.mp_pose.PoseLandmark.LEFT_WRIST.value)
+
+        elbow_angle = self.pose_detector.calculate_angle(shoulder, elbow, wrist)
+
+        feedback = []
+        score_components = []
+
+        # MediaPipe y is top-down: smaller y = higher on screen.
+        wrist_above_shoulder = wrist[1] < shoulder[1]
+
+        # Stage 'down' = rack position (bent elbows, wrists at/below shoulder line).
+        # Stage 'up'   = locked overhead (extended elbows, wrists above shoulders).
+        if elbow_angle < self.thresholds['shoulder_press']['elbow_down'] and not wrist_above_shoulder:
+            if self.stage != "down":
+                self.stage = "down"
+            score_components.append(100)
+        elif elbow_angle > self.thresholds['shoulder_press']['elbow_up'] and wrist_above_shoulder:
+            if self.stage == "down":
+                self.stage = "up"
+                self.rep_count += 1
+            score_components.append(100)
+        else:
+            score_components.append(70)
+            if elbow_angle > self.thresholds['shoulder_press']['elbow_up'] and not wrist_above_shoulder:
+                feedback.append("Press higher")
+
+        # Wrist should stack roughly over the elbow at lockout.
+        if abs(wrist[0] - elbow[0]) < self.thresholds['shoulder_press']['wrist_stack_max']:
+            score_components.append(100)
+        else:
+            score_components.append(60)
+            feedback.append("Stack wrist over elbow")
+
+        final_score = int(np.mean(score_components)) if score_components else 0
+
+        return {
+            'feedback': feedback,
+            'score': final_score,
+            'angles': {'elbow': elbow_angle},
+            'stage': self.stage,
+            'reps': self.rep_count
+        }
+
     def reset_reps(self):
         """Reset rep counter and stage"""
         self.rep_count = 0

@@ -6,8 +6,13 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
 backend/venv/
+
+# Local project bloat
+New folder/
+temp_meta_fit/
 build/
 develop-eggs/
 dist/
@@ -94,3 +99,4 @@ temp/
 *.db
 *.sqlite
 *.sqlite3
+.claude/
